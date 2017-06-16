@@ -105,6 +105,9 @@ class DrqaAgent(Agent):
     def add_cmdline_args(argparser):
         config.add_cmdline_args(argparser)
         SimpleDictionaryAgent.add_cmdline_args(argparser)
+        # so every model have three part of config. for task config.
+        # for model config, and for data config. so you split it. 
+        # and then you add these config to argparser. 
 
     @staticmethod
     def dictionary_class():

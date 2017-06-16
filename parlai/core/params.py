@@ -27,6 +27,7 @@ class ParlaiParser(object):
     def __init__(self, add_parlai_args=True, add_model_args=False):
         self.parser = argparse.ArgumentParser(description='ParlAI parser.')
         self.parser.register('type', 'bool', str2bool)
+        # register function: register name, value, object.
 
         self.parlai_home = (os.path.dirname(os.path.dirname(os.path.dirname(
                             os.path.realpath(__file__)))))
@@ -35,6 +36,7 @@ class ParlaiParser(object):
         self.add_arg = self.parser.add_argument
         self.add_argument = self.parser.add_argument
         self.register = self.parser.register
+        # function reassignment
 
         if add_parlai_args:
             self.add_parlai_args()
@@ -48,6 +50,7 @@ class ParlaiParser(object):
         self.parser.add_argument(
             '-dp', '--datapath', default=default_data_path,
             help='path to datasets, defaults to {parlai_dir}/data')
+        # add_argument parameter: *args **kwargs. so args just aliases
 
     def add_mturk_args(self):
         default_log_path = os.path.join(self.parlai_home, 'logs', 'mturk')
@@ -118,10 +121,13 @@ class ParlaiParser(object):
             agent = get_agent_module(model)
             if hasattr(agent, 'add_cmdline_args'):
                 agent.add_cmdline_args(self)
+                # add model config and dataset config
             if hasattr(agent, 'dictionary_class'):
                 self.parser.add_argument(
                     '--dict-class', default=agent.dictionary_class(), type=str,
                     help='the class of the dictionary agent used')
+                # from drqa.py model to get class DrqaAgent.
+                # to dict_class = parlai.agents.drqa.drqa:SimpleDictionaryAgent
 
     def parse_args(self, args=None, print_args=True):
         """Parses the provided arguments and returns a dictionary of the ``args``.

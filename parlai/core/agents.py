@@ -269,6 +269,8 @@ def get_agent_module(dir_name):
     else:
         module_name = "parlai.agents.%s.%s" % (dir_name, dir_name)
         class_name = name_to_agent_class(dir_name)
+        # parlai.agents.drqa.drqa
+        # DrqaAgent
     my_module = importlib.import_module(module_name)
     model_class = getattr(my_module, class_name)
     return model_class

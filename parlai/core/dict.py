@@ -95,6 +95,8 @@ class DictionaryAgent(Agent):
 
     def __init__(self, opt, shared=None):
         # initialize fields
+        # actually use config(model config, data config, etc)
+        # to get dictionary class
         self.opt = copy.deepcopy(opt)
         self.null_token = opt['dict_nulltoken']
         self.eos_token = opt['dict_eostoken']

@@ -65,6 +65,7 @@ def build_dict(opt):
             dict_fn = opt['model_file'].replace('.model', '.dict')
         else:
             dict_fn = opt['model_file'] + '.dict'
+        # not understand, what this mean
         opt['dict_loadpath'] = dict_fn
     if os.path.isfile(opt['dict_loadpath']):
         # dict already built
@@ -75,6 +76,11 @@ def build_dict(opt):
     if 'dict_class' in opt:
         # Custom dictionary class
         name = opt['dict_class'].split(':')
+        # when run drqa as examples, opt['dict_class'] = 
+        # parlai.agents.drqa.drqa:SimpleDictionaryAgent.
+        # in ParlaiParser if add_model_args is True, 
+        # you get model's cmd_args
+        # and dict_class. so you set this value.
         module = importlib.import_module(name[0])
         dict_class = getattr(module, name[1])
         dictionary = dict_class(opt)
@@ -88,7 +94,10 @@ def build_dict(opt):
         ordered_opt['datatype'] = datatype
         ordered_opt['numthreads'] = 1
         ordered_opt['batchsize'] = 1
+        import ipdb
+        ipdb.set_trace()
         world_dict = create_task(ordered_opt, dictionary)
+        # abstract all task as general framework?
         # pass examples to dictionary
         for _ in world_dict:
             cnt += 1
@@ -98,6 +107,7 @@ def build_dict(opt):
                 # don't wait too long...
                 break
             world_dict.parley()
+            # what this funciton do?
     dictionary.save(dict_fn, sort=True)
     opt['dict_loadpath'] = opt['dict_savepath']
     opt.pop('dict_savepath', None)
@@ -125,6 +135,8 @@ def main():
                         help='build dictionary first before training agent')
     opt = parser.parse_args()
     # Possibly build a dictionary (not all models do this).
+    import ipdb
+    ipdb.set_trace()
     if opt['dict_build_first']:
         build_dict(opt)
     # Create model and assign it to the specified task
