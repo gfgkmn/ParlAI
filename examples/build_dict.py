@@ -13,6 +13,7 @@ import copy
 import importlib
 import os
 
+
 def build_dict(opt):
     if 'dict_file' not in opt:
         return
@@ -24,9 +25,16 @@ def build_dict(opt):
     if 'dict_class' in opt:
         # Custom dictionary class
         name = opt['dict_class'].split(':')
+        # through ParlaiParser'parameter model == true.
+        # use self.add_cmdline_args in self.add_model_args
+        # to add model's config and data's config through
+        # dictionary config.
+        # so opt['dict_class'] = parlai.agents.drqa.drqa:SimpleDictionaryAgent
         module = importlib.import_module(name[0])
         dict_class = getattr(module, name[1])
         dictionary = dict_class(opt)
+        # SimpleDictionaryAgent from parlai/agents/drqa/drqa.py
+        # user_agent initialize.
     else:
         # Default dictionary class
         dictionary = DictionaryAgent(opt)
@@ -34,9 +42,14 @@ def build_dict(opt):
     cnt = 0
     # we use train set to build dictionary
     ordered_opt['datatype'] = 'train:ordered'
+    # DialogTeacher parent class used when initialize.
     ordered_opt['numthreads'] = 1
     ordered_opt['batchsize'] = 1
     world_dict = create_task(ordered_opt, dictionary)
+    # when use squad drqa task.
+    # DialogPartnerWorld(opt, DefaultTeacher + SimpleDictionaryAgent)
+    # world_dict, look like some step between build world
+    # environment.
     # pass examples to dictionary
     for _ in world_dict:
         cnt += 1
@@ -45,9 +58,13 @@ def build_dict(opt):
             # don't wait too long...
             break
         world_dict.parley()
+        # looks like, default teacher give the data to dictionary.
+        # so always use world.parley to generate next iteration.
+        # and in agents[0], indicate whether data is already done.
     print('[ dictionary built. ]')
     dictionary.save(opt['dict_file'], sort=True)
     # print('[ num words =  %d ]' % len(dictionary))
+
 
 def main():
     # Get command line arguments
@@ -55,6 +72,7 @@ def main():
     DictionaryAgent.add_cmdline_args(argparser)
     opt = argparser.parse_args()
     build_dict(opt)
+
 
 if __name__ == '__main__':
     main()

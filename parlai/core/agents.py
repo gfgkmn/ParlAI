@@ -326,6 +326,10 @@ def create_task_agent_from_taskname(opt):
         my_module = importlib.import_module(module_name)
         teacher_class = getattr(my_module, teacher)
         task_agents = teacher_class(opt)
+        # initialize agent here
+        # for drqa examples build_dict step, you use 
+        # DefaultTeacher in parlai/task/squad/agents.py
+        # as task_agents
         if type(task_agents) != list:
             task_agents = [task_agents]
         return task_agents
@@ -362,6 +366,8 @@ def _create_task_agents(opt):
     except AttributeError:
         # Create_agent not found, so try to create the teacher directly.
         return create_task_agent_from_taskname(opt)
+        # in squad there are not create_agents implement.
+        # so we create_task_agent_from_taskname
     if type(task_agents) != list:
         task_agents = [task_agents]
     return task_agents

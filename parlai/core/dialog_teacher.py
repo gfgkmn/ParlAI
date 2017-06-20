@@ -49,6 +49,9 @@ class DialogTeacher(Teacher):
         else:
             self.data = DialogData(opt, self.setup_data(opt['datafile']),
                                    cands=self.label_candidates())
+            # opt['datafile'] get value in children class init.
+            # self.label_candidates alse should rewrite in children class
+            # for cloze-style task
 
         # for ordered data in batch mode (especially, for validation and
         # testing), each teacher in the batch gets a start index and a step
@@ -97,6 +100,7 @@ class DialogTeacher(Teacher):
         if self.lastY is not None:
             self.metrics.update(observation, self.lastY)
             self.lastY = None
+            # why you set lastY to None ?
         return observation
 
     def next_example(self):
@@ -121,6 +125,8 @@ class DialogTeacher(Teacher):
             # this is used for ordered data to check whether there's more data
             epoch_done = True
 
+        # action is data, so DialogTeacher's act is generate next examples.
+        # epoch done, know what's epoch, and what's episode.
         return action, epoch_done
 
     def act(self):
@@ -199,6 +205,8 @@ class DialogData(object):
         episode = []
         last_cands = None
         for entry, new in data_loader:
+            # entry: (setup_data result (context+'\n'+question, answer))
+            # new symbol indicate whether new-episode.
             if new and len(episode) > 0:
                 self.data.append(tuple(episode))
                 episode = []
@@ -212,18 +220,21 @@ class DialogData(object):
                     new_entry.append(sys.intern(entry[0]))
                 else:
                     new_entry.append(None)
+                    # x is sample input
                 if len(entry) > 1:
                     # process labels if available
                     if entry[1] is not None:
                         new_entry.append(tuple(sys.intern(e) for e in entry[1]))
                     else:
                         new_entry.append(None)
+                        # entry[1] is iterator y label
                     if len(entry) > 2:
                         # process reward if available
                         if entry[2] is not None:
                             new_entry.append(sys.intern(entry[2]))
                         else:
                             new_entry.append(None)
+                        # entry[3] is possible reward
                         if len(entry) > 3:
                             if entry[3] is not None:
                                 # process label candidates if available
@@ -238,8 +249,10 @@ class DialogData(object):
                                         sys.intern(e) for e in entry[3]))
                             else:
                                 new_entry.append(None)
+                            # entry[3] is label_condidate
                             if len(entry) > 4 and entry[4] is not None:
                                 new_entry.append(sys.intern(entry[4]))
+                            # maybe image or something append data
 
             episode.append(tuple(new_entry))
 

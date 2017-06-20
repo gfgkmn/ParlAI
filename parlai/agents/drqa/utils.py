@@ -16,6 +16,7 @@ from collections import Counter
 
 def normalize_text(text):
     return unicodedata.normalize('NFD', text)
+    # what whid NFC, NFD, NFKC, NFKD mean? normalize ?
 
 
 def load_embeddings(opt, word_dict):

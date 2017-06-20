@@ -80,10 +80,10 @@ def main():
                         help='build dictionary first before training agent')
     opt = parser.parse_args()
     # Possibly build a dictionary (not all models do this).
-    import ipdb
-    ipdb.set_trace()
     if opt['dict_build_first']:
         if 'dict_file' not in opt and 'model_file' in opt:
+            # not indicate dictionary file, but when run squad
+            # model_file is ''
             opt['dict_file'] = opt['model_file'] + '.dict'
         build_dict.build_dict(opt)
     # Create model and assign it to the specified task

@@ -225,6 +225,7 @@ class DialogPartnerWorld(World):
             if len(agents) != 2:
                 raise RuntimeError('There must be exactly two agents for this ' +
                                    'world.')
+                # data generator and model.
             # Add passed in agents directly.
             self.agents = agents
         self.acts = [None] * len(self.agents)
@@ -694,15 +695,23 @@ def _get_task_world(opt):
         try:
             my_module = importlib.import_module(module_name)
             world_class = getattr(my_module, world_name)
+            # so in your task, you also should implement world.py
+            # if you task have special world.
         except:
             # Defaults to this if you did not specify a world for your task.
             world_class = DialogPartnerWorld
     task_agents = _create_task_agents(opt)
+    # for drqa examples build_dict step.
+    # return DialogPartnerWorld as world_class
+    # and DefaultTeacher as task_agents
     return world_class, task_agents
 
 
 def create_task_world(opt, user_agents):
     world_class, task_agents = _get_task_world(opt)
+    # when use drqa example, user_agents = 
+    # ['parlai.agents.drqa.drqa:SimpleDictionaryAgent']
+    # DialogPartnerWorld(opt, DefaultTeacher + SimpleDictionaryAgent)
     return world_class(opt, task_agents + user_agents)
 
 def create_task(opt, user_agents):
@@ -728,6 +737,9 @@ def create_task(opt, user_agents):
         if ',' not in opt['task']:
             # Single task
             world = create_task_world(opt, user_agents)
+            # so we have data, we should create world environment.
+            # and according to multi task and single task.
+            # use MultiWorld, or create_task_world
         else:
             # Multitask teacher/agent
             world = MultiWorld(opt, user_agents)

@@ -86,6 +86,7 @@ class DefaultTeacher(DialogTeacher):
     def __init__(self, opt, shared=None):
         self.datatype = opt['datatype']
         build(opt)
+        # just check whether data is exist, and download it.
         if opt['datatype'].startswith('train'):
             suffix = 'train'
         else:
