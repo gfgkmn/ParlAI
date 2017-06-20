@@ -21,7 +21,7 @@ try:
 except ModuleNotFoundError:
     raise ModuleNotFoundError('Need to install pytorch: go to pytorch.org')
 
-import os 
+import os
 import numpy as np
 import logging
 import copy
@@ -134,7 +134,7 @@ class DrqaAgent(Agent):
         self.word_dict = word_dict
         self.opt = copy.deepcopy(opt)
         config.set_defaults(self.opt)
-        
+
         if 'model_file' in self.opt and os.path.isfile(opt['model_file']):
             self._init_from_saved(opt['model_file'])
         else:
@@ -159,7 +159,7 @@ class DrqaAgent(Agent):
         self.model.set_embeddings()
 
     def _init_from_saved(self, fname):
-        print('[ Loading model %s ]' % fname) 
+        print('[ Loading model %s ]' % fname)
         saved_params = torch.load(fname,
             map_location=lambda storage, loc: storage
         )
@@ -305,4 +305,3 @@ class DrqaAgent(Agent):
             '[train] updates = %d | train loss = %.2f | exs = %d' %
             (self.model.updates, self.model.train_loss.avg, self.n_examples)
             )
-
