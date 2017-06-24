@@ -459,6 +459,8 @@ class BatchWorld(World):
     the parameters for each.
     The underlying world(s) it is batching can be either ``DialogPartnerWorld``,
     ``MultiAgentWorld`` or ``MultiWorld``.
+    when batchsize > 1 we use batchworld, notice batchworld use other world as building
+    block
     """
 
     def __init__(self, opt, world):
@@ -473,6 +475,8 @@ class BatchWorld(World):
             # which is needed for ordered data (esp valid/test sets)
             override_opts_in_shared(shared, {'batchindex': i})
             self.worlds.append(shared['world_class'](opt, None, shared))
+            # use shared to shared almost all data , but agents belong to batchworld.
+            # interestring setting.
         self.batch_observations = [ None ] * len(self.world.get_agents())
 
     def __iter__(self):
@@ -490,6 +494,8 @@ class BatchWorld(World):
             if observation is None:
                 raise ValueError('Agents should return what they observed.')
             batch_observations.append(observation)
+            # so observation is always act individually ?
+            # but act maybe use class agent to do batch
         return batch_observations
 
     def batch_act(self, index, batch_observation):
@@ -498,8 +504,11 @@ class BatchWorld(World):
         a = self.world.get_agents()[index]
         if (batch_observation is not None and len(batch_observation) > 0 and
                 hasattr(a, 'batch_act')):
+            # got data samples and len(data_samples) > 0 and model support batch-learn
             batch_actions = a.batch_act(batch_observation)
+            # notice this a is class agent so is is_shared = false
             # Store the actions locally in each world.
+            # use class agent do action simultanously
             for w in self.worlds:
                 acts = w.get_acts()
                 acts[index] = batch_actions[index]
@@ -554,6 +563,8 @@ class BatchWorld(World):
         return True
 
     def report(self):
+        # insteresting, just report world 0 report.
+        # report about first batch sample ?
         return self.worlds[0].report()
 
     def reset(self):
@@ -681,8 +692,6 @@ class HogwildWorld(World):
 def _get_task_world(opt):
     sp = opt['task'].strip().split(':')
     if '.' in sp[0]:
-        # The case of opt['task'] = 'parlai.tasks.squad.agents:DefaultTeacher'
-        # (i.e. specifying your own path directly, assumes DialogPartnerWorld)
         world_class = DialogPartnerWorld
     else:
         task = sp[0].lower()
@@ -704,14 +713,19 @@ def _get_task_world(opt):
     # for drqa examples build_dict step.
     # return DialogPartnerWorld as world_class
     # and DefaultTeacher as task_agents
+    # -----
+    # cause squad task not world.py so try failure , we use DialogPartnerWorld
+    # else we will be use DefaultWorld or parlai.tasks.squad.agents:Someworld
     return world_class, task_agents
 
 
 def create_task_world(opt, user_agents):
     world_class, task_agents = _get_task_world(opt)
-    # when use drqa example, user_agents = 
+    # when use drqa example, in build_dictionary step user_agents = 
     # ['parlai.agents.drqa.drqa:SimpleDictionaryAgent']
     # DialogPartnerWorld(opt, DefaultTeacher + SimpleDictionaryAgent)
+    # ------
+    # after in train phrase, user_agents = DrqaAgent
     return world_class(opt, task_agents + user_agents)
 
 def create_task(opt, user_agents):
@@ -720,6 +734,8 @@ def create_task(opt, user_agents):
     e.g. ``"babi:Task1k:1"`` or ``"#babi-1k"`` or ``"#QA"``,
     see ``parlai/tasks/tasks.py`` and see ``parlai/tasks/task_list.py``
     for list of tasks.
+    so this system support indicate task use task id, or task name or task tag.
+    or micellanous three of them.
     """
     if type(user_agents) != list:
         user_agents = [user_agents]
@@ -729,6 +745,8 @@ def create_task(opt, user_agents):
     opt = copy.deepcopy(opt)
     opt['task'] = ids_to_tasks(opt['task'])
     print('[creating task(s): ' + opt['task'] + ']')
+
+    # after build_dict this time we have DrqaAgent as user_agents
 
     # Single threaded or hogwild task creation (the latter creates multiple threads).
     # Check datatype for train, because we need to do single-threaded for

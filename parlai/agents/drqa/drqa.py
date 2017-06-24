@@ -76,6 +76,10 @@ class SimpleDictionaryAgent(DictionaryAgent):
         return [t.text for t in tokens]
 
     def span_tokenize(self, text):
+        """
+        self.word_dict.span_tokenize('what if i do')
+        [(0, 4), (5, 7), (8, 9), (10, 12)]
+        """
         tokens = NLP.tokenizer(text)
         return [(t.idx, t.idx + len(t.text)) for t in tokens]
 
@@ -124,6 +128,7 @@ class DrqaAgent(Agent):
         self.episode_done = True
 
         # Only create an empty dummy class when sharing
+        # what this mean ? create dummy class?
         if shared is not None:
             self.is_shared = True
             return
@@ -147,6 +152,7 @@ class DrqaAgent(Agent):
             print('[ Using CUDA (GPU %d) ]' % opt['gpu'])
             torch.cuda.set_device(opt['gpu'])
             self.model.cuda()
+            # model.cuda, network.cuda? what this mean?
         self.n_examples = 0
 
     def _init_from_scratch(self):
@@ -218,6 +224,8 @@ class DrqaAgent(Agent):
         # Some examples will be None (no answer found). Filter them.
         examples = [self._build_ex(obs) for obs in observations]
         valid_inds = [i for i in range(batchsize) if examples[i] is not None]
+        # examples[i] is None, when in example not text fiele(document), or
+        # target field(answer), or epoch done
         examples = [ex for ex in examples if ex is not None]
 
         # If all examples are invalid, return an empty batch.
@@ -235,6 +243,8 @@ class DrqaAgent(Agent):
             self.model.update(batch)
         else:
             predictions = self.model.predict(batch)
+            # assert len(examples) == len(valid_inds)
+            # cause you have already filter invalid examples
             for i in range(len(predictions)):
                 batch_reply[valid_inds[i]]['text'] = predictions[i]
 
@@ -280,6 +290,7 @@ class DrqaAgent(Agent):
 
         # Vectorize.
         inputs = vectorize(self.opt, inputs, self.word_dict, self.feature_dict)
+        # return document, features, question, start, end all torch.LongTensor
 
         # Return inputs with original text + spans (keep for prediction)
         return inputs + (document, self.word_dict.span_tokenize(document))
@@ -299,6 +310,8 @@ class DrqaAgent(Agent):
         if len(targets) == 0:
             return
         return targets[np.random.choice(len(targets))]
+        # so we could know drqa's hypothesis is still squad-like dataset.
+        # answer should be sub-string in document.
 
     def report(self):
         return (

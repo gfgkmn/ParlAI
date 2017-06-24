@@ -42,6 +42,8 @@ def load_embeddings(opt, word_dict):
 
 def build_feature_dict(opt):
     """Make mapping of feature option to feature index."""
+    # add manual features to this agent.
+    # i know why you initialize DocumentReader with featuredict
     feature_dict = {}
     if opt['use_in_question']:
         feature_dict['in_question'] = len(feature_dict)
@@ -68,6 +70,7 @@ def vectorize(opt, ex, word_dict, feature_dict):
 
     # Create extra features vector
     features = torch.zeros(len(ex['document']), len(feature_dict))
+    # feature matrix, len(docuemnt) * len(feature) shape
 
     # f_{exact_match}
     if opt['use_in_question']:
@@ -90,6 +93,7 @@ def vectorize(opt, ex, word_dict, feature_dict):
         # Counting from the end, each (full-stop terminated) sentence gets
         # its own time identitfier.
         sent_idx = 0
+
         def _full_stop(w):
             return w in {'.', '?', '!'}
         for i, w in reversed(list(enumerate(ex['document']))):
@@ -98,6 +102,9 @@ def vectorize(opt, ex, word_dict, feature_dict):
                 features[i][feature_dict['time=T%d' % sent_idx]] = 1.0
             else:
                 features[i][feature_dict['time>=T%d' % opt['use_time']]] = 1.0
+    # just like sentence reverse identifier. when use-time=8. and there are 16
+    # sentence.  so first 8 sentence feature is time>t8 and then time=t7
+    # time=t6 etc. and alway is a feature matrix
 
     # Maybe return without target
     if ex['target'] is None:
@@ -111,7 +118,10 @@ def vectorize(opt, ex, word_dict, feature_dict):
 
 
 def batchify(batch, null=0, cuda=False):
-    """Collate inputs into batches."""
+    """
+    Collate inputs into batches.
+    generate input matrix and vector for batch.
+    """
     NUM_INPUTS = 3
     NUM_TARGETS = 2
     NUM_EXTRA = 2
@@ -122,16 +132,21 @@ def batchify(batch, null=0, cuda=False):
     questions = [ex[2] for ex in batch]
     text = [ex[-2] for ex in batch]
     spans = [ex[-1] for ex in batch]
+    # we couldn't sure ex[3] and ex[4] is exist.
 
     # Batch documents and features
     max_length = max([d.size(0) for d in docs])
+    # max_length is not global setting, it's a batch setting.
     x1 = torch.LongTensor(len(docs), max_length).fill_(null)
+    # (samples, doc_lengths(time_steps))
     x1_mask = torch.ByteTensor(len(docs), max_length).fill_(1)
     x1_f = torch.zeros(len(docs), max_length, features[0].size(1))
+    # (samples, doc_lengths(time_steps), features)
     for i, d in enumerate(docs):
         x1[i, :d.size(0)].copy_(d)
         x1_mask[i, :d.size(0)].fill_(0)
         x1_f[i, :d.size(0)].copy_(features[i])
+    # fill document matrix.
 
     # Batch questions
     max_length = max([q.size(0) for q in questions])
@@ -140,10 +155,12 @@ def batchify(batch, null=0, cuda=False):
     for i, q in enumerate(questions):
         x2[i, :q.size(0)].copy_(q)
         x2_mask[i, :q.size(0)].fill_(0)
+    # fill question matrix.
 
     # Pin memory if cuda
     if cuda:
         x1 = x1.pin_memory()
+        # looks-like some memory optimize technicle
         x1_f = x1_f.pin_memory()
         x1_mask = x1_mask.pin_memory()
         x2 = x2.pin_memory()
@@ -158,6 +175,7 @@ def batchify(batch, null=0, cuda=False):
         y_s = torch.cat([ex[3] for ex in batch])
         y_e = torch.cat([ex[4] for ex in batch])
         return x1, x1_f, x1_mask, x2, x2_mask, y_s, y_e, text, spans
+    # start-position and end position vector
 
     # ...Otherwise wrong number of inputs
     raise RuntimeError('Wrong number of inputs per batch')

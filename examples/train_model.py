@@ -39,6 +39,8 @@ def run_eval(agent, opt, datatype, still_training=False):
     print("[ running eval: " + datatype + " ]")
     opt['datatype'] = datatype
     valid_world = create_task(opt, agent)
+    # len(BatchWorld) == average(len(ChildrenWorld))
+    # len(ChildrenWorldAgent0) == len(ChildrenWorldAgent0.data)
     for i in range(len(valid_world)):
         valid_world.parley()
         if i == 1 and opt['display_examples']:
@@ -88,7 +90,9 @@ def main():
         build_dict.build_dict(opt)
     # Create model and assign it to the specified task
     agent = create_agent(opt)
+    # DrqaAgent have initialize
     world = create_task(opt, agent)
+    # BatchWorld(opt, DefaultTeacher + DrqaAgent)
 
     train_time = Timer()
     validate_time = Timer()
@@ -96,6 +100,8 @@ def main():
     print("[ training... ]")
     parleys = 0
     num_parleys = opt['num_epochs'] * int(len(world) / opt['batchsize'])
+    # len(world) == len(world.agent[0]) == len(world[agent[0].dialogdata])
+    # == sum of episode == len(data)
     best_accuracy = 0
     impatience = 0
     saved = False

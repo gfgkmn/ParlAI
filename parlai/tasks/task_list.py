@@ -144,6 +144,13 @@ task_list = [
         "description": "Open-domain QA dataset answerable from a given paragraph from Wikipedia, from Rajpurkar et al. '16. Link: https://arxiv.org/abs/1606.05250"
     },
     {
+        "id": "TriviaQA",
+        "display_name": "TriviaQA",
+        "task": "triviaqa",
+        "tags": [ "all",  "QA" ],
+        "description": "Open-domain QA dataset answerable from  Wikipedia and web, constructed by distant supervision, from Mandar Joshi et al. '16. Link: https://arxiv.org/abs/1705.03551"
+    },
+    {
         "id": "Ubuntu",
         "display_name": "Ubuntu",
         "task": "ubuntu",

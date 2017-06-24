@@ -288,6 +288,11 @@ def create_agent(opt):
 # returned from agent.share(). Useful for parallelism, sharing params, etc.
 def create_agent_from_shared(shared_agent):
     a = shared_agent['class'](shared_agent['opt'], shared_agent)
+    # so for DrqaAgent create dummy class.
+    # and DialogTeacher just get data from shared['data']
+    # so i know BatchWorld, and shared mechanism, share always called by parent
+    # class or BatchWorld initialize, then every world like a instance, and 
+    # when this instance initialize, it get data from shared.
     return a
 
 def create_agents_from_shared(shared):
