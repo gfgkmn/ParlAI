@@ -76,6 +76,9 @@ class Agent(object):
     def reset(self):
         self.observation = None
 
+    def reset_metrics(self):
+        pass
+
     def share(self):
         """If applicable, share any parameters needed to create a shared version
         of this agent.
@@ -133,7 +136,10 @@ class Teacher(Agent):
 
     def reset(self):
         super().reset()
+        self.reset_metrics()
         self.epochDone = False
+
+    def reset_metrics(self):
         self.metrics.clear()
 
     def share(self):
@@ -242,6 +248,10 @@ class MultiTaskTeacher(Teacher):
         for t in self.tasks:
             t.reset()
 
+    def reset_metrics(self):
+        for t in self.tasks:
+            t.reset_metrics()
+
     def share(self):
         shared = {}
         shared['class'] = type(self)
@@ -281,8 +291,11 @@ def create_agent(opt):
     (i.e. the path followed by the class name) or else just ``ir_baseline`` which
     assumes the path above, and a class name suffixed with 'Agent'.
     """
-    model_class = get_agent_module(opt['model'])
-    return model_class(opt)
+    if opt.get('model'):
+        model_class = get_agent_module(opt['model'])
+        return model_class(opt)
+    else:
+        raise RuntimeError('Need to set `model` argument to use create_agent.')
 
 # Helper functions to create agent/agents given shared parameters
 # returned from agent.share(). Useful for parallelism, sharing params, etc.
