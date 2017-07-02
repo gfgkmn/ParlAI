@@ -22,7 +22,7 @@ python examples/train_model.py -m drqa -t babi:Task10k:1 -mf "/tmp/model" -bs 10
 TODO List:
 - More logging (e.g. to files), make things prettier.
 """
-
+import spacy
 from parlai.core.agents import create_agent
 from parlai.core.worlds import create_task
 from parlai.core.params import ParlaiParser
@@ -33,6 +33,7 @@ import copy
 import importlib
 import math
 import os
+import logging
 
 def run_eval(agent, opt, datatype, still_training=False):
     ''' Eval on validation/test data. '''
@@ -50,6 +51,7 @@ def run_eval(agent, opt, datatype, still_training=False):
     valid_report = valid_world.report()
     metrics = datatype + ":" + str(valid_report)
     print(metrics)
+    data_logger.info(metrics)
     if still_training:
         return valid_report
     else:
@@ -155,6 +157,13 @@ def main():
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    data_logger = logging.getLogger('datalogger')
+    fh = logging.FileHandler('drqa.log')
+    fh.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+                '%(asctime)s - %(levelname)s       %(message)s'
+            )
+    fh.setFormatter(formatter)
+    data_logger.addHandler(fh)
     main()
-
-
