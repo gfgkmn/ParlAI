@@ -6,16 +6,16 @@
 """This module provides a set of basic agents:
 
     ``Agent(object)``
-    base class for all other agents, implements the ``observe()`` method 
+    base class for all other agents, implements the ``observe()`` method
     which receives an observation/action dict and the ``act()`` method which
     returns a dict in response.
 
     ``Teacher(Agent)``
-    also implements the ``report()`` method for returning metrics. All ParlAI tasks implement 
+    also implements the ``report()`` method for returning metrics. All ParlAI tasks implement
     the ``Teacher`` class.
 
     ``MultiTaskTeacher(Teacher)``
-    creates a set of teachers based on a "task string" passed to the ``Teacher``, 
+    creates a set of teachers based on a "task string" passed to the ``Teacher``,
     creating multiple teachers within it and alternating between them.
 
 All agents are initialized with the following parameters:
@@ -32,7 +32,7 @@ All agents are initialized with the following parameters:
 This module also provides a utility method:
 
     ``create_task_agents(str)``: instantiate task-specific agents (e.g. a teacher)
-    from a given task string (e.g. 'babi:task1k:1' or 'squad'). Used by 
+    from a given task string (e.g. 'babi:task1k:1' or 'squad'). Used by
     ``MultiTaskTeacher``.
 
 """
@@ -237,7 +237,7 @@ class MultiTaskTeacher(Teacher):
         if num_tasks > 0:
             m['accuracy'] = sum_accuracy / num_tasks
         return m
-      
+
     def reset(self):
         for t in self.tasks:
             t.reset()
@@ -288,6 +288,11 @@ def create_agent(opt):
 # returned from agent.share(). Useful for parallelism, sharing params, etc.
 def create_agent_from_shared(shared_agent):
     a = shared_agent['class'](shared_agent['opt'], shared_agent)
+    # so for DrqaAgent create dummy class.
+    # and DialogTeacher just get data from shared['data']
+    # so i know BatchWorld, and shared mechanism, share always called by parent
+    # class or BatchWorld initialize, then every world like a instance, and 
+    # when this instance initialize, it get data from shared.
     return a
 
 def create_agents_from_shared(shared):
@@ -302,10 +307,13 @@ def create_task_agent_from_taskname(opt):
     """Creates task agent(s) assuming the input ``task_dir:teacher_class``.
 
     e.g. def_string is a shorthand path like ``babi:Task1k:1`` or ``#babi``
-    or a complete path like ``parlai.tasks.babi.agents:Task1kTeacher:1``, 
+    or a complete path like ``parlai.tasks.babi.agents:Task1kTeacher:1``,
     which essentially performs ``from parlai.tasks.babi import Task1kTeacher``
     with the parameter ``1`` in ``opt['task']`` to be used by the class ``Task1kTeacher``.
     """
+    if not opt.get('task'):
+        raise RuntimeError('No task specified. Please select a task with ' +
+                           '--task {task_name}.')
     if ',' not in opt['task']:
         # Single task
         sp = opt['task'].strip().split(':')

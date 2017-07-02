@@ -21,7 +21,7 @@ try:
 except ModuleNotFoundError:
     raise ModuleNotFoundError('Need to install pytorch: go to pytorch.org')
 
-import os 
+import os
 import numpy as np
 import logging
 import copy
@@ -49,17 +49,17 @@ class SimpleDictionaryAgent(DictionaryAgent):
 
     @staticmethod
     def add_cmdline_args(argparser):
-        DictionaryAgent.add_cmdline_args(argparser)
-        argparser.add_arg(
+        group = DictionaryAgent.add_cmdline_args(argparser)
+        group.add_argument(
             '--pretrained_words', type='bool', default=True,
             help='Use only words found in provided embedding_file'
         )
 
     def __init__(self, *args, **kwargs):
-        super(SimpleDictionaryAgent, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
         # Index words in embedding file
-        if self.opt['pretrained_words'] and 'embedding_file' in self.opt:
+        if self.opt['pretrained_words'] and self.opt.get('embedding_file'):
             print('[ Indexing words with embeddings... ]')
             self.embedding_words = set()
             with open(self.opt['embedding_file']) as f:
@@ -76,6 +76,10 @@ class SimpleDictionaryAgent(DictionaryAgent):
         return [t.text for t in tokens]
 
     def span_tokenize(self, text):
+        """
+        self.word_dict.span_tokenize('what if i do')
+        [(0, 4), (5, 7), (8, 9), (10, 12)]
+        """
         tokens = NLP.tokenizer(text)
         return [(t.idx, t.idx + len(t.text)) for t in tokens]
 
@@ -104,14 +108,15 @@ class DrqaAgent(Agent):
     @staticmethod
     def add_cmdline_args(argparser):
         config.add_cmdline_args(argparser)
-        SimpleDictionaryAgent.add_cmdline_args(argparser)
+        DrqaAgent.dictionary_class().add_cmdline_args(argparser)
+        # dictionary_class is SimpleDictionaryAgent so support other diction_class
         # so every model have three part of config. for task config.
         # for model config, and for data config. so you split it. 
         # and then you add these config to argparser. 
 
     @staticmethod
     def dictionary_class():
-        return "parlai.agents.drqa.drqa:SimpleDictionaryAgent"
+        return SimpleDictionaryAgent
 
     def __init__(self, opt, shared=None):
         if opt['numthreads'] >1:
@@ -119,11 +124,12 @@ class DrqaAgent(Agent):
 
         # Load dict.
         if not shared:
-            word_dict = SimpleDictionaryAgent(opt)
+            word_dict = DrqaAgent.dictionary_class()(opt)
         # All agents keep track of the episode (for multiple questions)
         self.episode_done = True
 
         # Only create an empty dummy class when sharing
+        # what this mean ? create dummy class?
         if shared is not None:
             self.is_shared = True
             return
@@ -134,11 +140,11 @@ class DrqaAgent(Agent):
         self.word_dict = word_dict
         self.opt = copy.deepcopy(opt)
         config.set_defaults(self.opt)
-        
-        if 'model_file' in self.opt and os.path.isfile(opt['model_file']):
+
+        if self.opt.get('model_file') and os.path.isfile(opt['model_file']):
             self._init_from_saved(opt['model_file'])
         else:
-            if 'pretrained_model' in self.opt:
+            if self.opt.get('pretrained_model'):
                 self._init_from_saved(opt['pretrained_model'])
             else:
                 self._init_from_scratch()
@@ -147,6 +153,7 @@ class DrqaAgent(Agent):
             print('[ Using CUDA (GPU %d) ]' % opt['gpu'])
             torch.cuda.set_device(opt['gpu'])
             self.model.cuda()
+            # model.cuda, network.cuda? what this mean?
         self.n_examples = 0
 
     def _init_from_scratch(self):
@@ -159,7 +166,7 @@ class DrqaAgent(Agent):
         self.model.set_embeddings()
 
     def _init_from_saved(self, fname):
-        print('[ Loading model %s ]' % fname) 
+        print('[ Loading model %s ]' % fname)
         saved_params = torch.load(fname,
             map_location=lambda storage, loc: storage
         )
@@ -218,6 +225,8 @@ class DrqaAgent(Agent):
         # Some examples will be None (no answer found). Filter them.
         examples = [self._build_ex(obs) for obs in observations]
         valid_inds = [i for i in range(batchsize) if examples[i] is not None]
+        # examples[i] is None, when in example not text fiele(document), or
+        # target field(answer), or epoch done
         examples = [ex for ex in examples if ex is not None]
 
         # If all examples are invalid, return an empty batch.
@@ -235,6 +244,8 @@ class DrqaAgent(Agent):
             self.model.update(batch)
         else:
             predictions = self.model.predict(batch)
+            # assert len(examples) == len(valid_inds)
+            # cause you have already filter invalid examples
             for i in range(len(predictions)):
                 batch_reply[valid_inds[i]]['text'] = predictions[i]
 
@@ -280,6 +291,7 @@ class DrqaAgent(Agent):
 
         # Vectorize.
         inputs = vectorize(self.opt, inputs, self.word_dict, self.feature_dict)
+        # return document, features, question, start, end all torch.LongTensor
 
         # Return inputs with original text + spans (keep for prediction)
         return inputs + (document, self.word_dict.span_tokenize(document))
@@ -299,10 +311,11 @@ class DrqaAgent(Agent):
         if len(targets) == 0:
             return
         return targets[np.random.choice(len(targets))]
+        # so we could know drqa's hypothesis is still squad-like dataset.
+        # answer should be sub-string in document.
 
     def report(self):
         return (
             '[train] updates = %d | train loss = %.2f | exs = %d' %
             (self.model.updates, self.model.train_loss.avg, self.n_examples)
             )
-

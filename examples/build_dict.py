@@ -7,7 +7,7 @@
 
 from parlai.core.dict import DictionaryAgent
 from parlai.core.worlds import DialogPartnerWorld
-from parlai.core.params import ParlaiParser
+from parlai.core.params import ParlaiParser, str2class
 from parlai.core.worlds import create_task
 import copy
 import importlib
@@ -15,24 +15,22 @@ import os
 
 
 def build_dict(opt):
-    if 'dict_file' not in opt:
+    if not opt.get('dict_file'):
+        print('Tried to build dictionary but `--dict-file` is not set. Set ' +
+              'this param so the dictionary can be saved.')
         return
     print('[ setting up dictionary. ]')
     if os.path.isfile(opt['dict_file']):
         # Dictionary already built
         print("[ dictionary already built .]")
         return
-    if 'dict_class' in opt:
+    if opt.get('dict_class'):
         # Custom dictionary class
-        name = opt['dict_class'].split(':')
+        dictionary = str2class(opt['dict_class'])(opt)
         # through ParlaiParser'parameter model == true.
         # use self.add_cmdline_args in self.add_model_args
         # to add model's config and data's config through
         # dictionary config.
-        # so opt['dict_class'] = parlai.agents.drqa.drqa:SimpleDictionaryAgent
-        module = importlib.import_module(name[0])
-        dict_class = getattr(module, name[1])
-        dictionary = dict_class(opt)
         # SimpleDictionaryAgent from parlai/agents/drqa/drqa.py
         # user_agent initialize.
     else:
