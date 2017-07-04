@@ -22,6 +22,11 @@ class RnnDocReader(nn.Module):
                                       opt['embedding_dim'],
                                       padding_idx=padding_idx)
 
+        # todo add parameters into opt
+        self.char_embedding = nn.Embedding(opt['char_size'],
+                                           opt['char_embedding_dim'],
+                                           padding_idx=padding_idx)
+
         # ...(maybe) keep them fixed
         if opt['fix_embeddings']:
             for p in self.embedding.parameters():
@@ -40,7 +45,9 @@ class RnnDocReader(nn.Module):
             self.qemb_match = layers.SeqAttnMatch(opt['embedding_dim'])
 
         # Input size to RNN: word emb + question emb + manual features
-        doc_input_size = opt['embedding_dim'] + opt['num_features']
+        # todo add parameters into opt
+        doc_input_size = opt['embedding_dim'] + opt['num_features'] + \
+            opt['charemb_rnn_dim']
         if opt['use_qemb']:
             doc_input_size += opt['embedding_dim']
 
@@ -56,9 +63,11 @@ class RnnDocReader(nn.Module):
             padding=opt['rnn_padding'],
         )
 
+        question_input_size = opt['embedding_dim'] + opt['charemb_rnn_dim']
+
         # RNN question encoder
         self.question_rnn = layers.StackedBRNN(
-            input_size=opt['embedding_dim'],
+            input_size=question_input_size,
             hidden_size=opt['hidden_size'],
             num_layers=opt['question_layers'],
             dropout_rate=opt['dropout_rnn'],
@@ -77,7 +86,8 @@ class RnnDocReader(nn.Module):
 
         # Question merging
         if opt['question_merge'] not in ['avg', 'self_attn']:
-            raise NotImplementedError('question_merge = %s' % opt['question_merge'])
+            raise NotImplementedError(
+                'question_merge = %s' % opt['question_merge'])
         if opt['question_merge'] == 'self_attn':
             self.self_attn = layers.LinearSeqAttn(question_hidden_size)
 
@@ -91,18 +101,24 @@ class RnnDocReader(nn.Module):
             question_hidden_size,
         )
 
-    def forward(self, x1, x1_f, x1_mask, x2, x2_mask):
+    def forward(self, x1, x1_f, x1_mask, x1_chars, x1_chars_mask, x2, x2_mask,
+                x2_chars, x2_chars_mask):
         """Inputs:
-        x1 = document word indices             [batch * len_d]
-        x1_f = document word features indices  [batch * len_d * nfeat]
-        x1_mask = document padding mask        [batch * len_d]
-        x2 = question word indices             [batch * len_q]
-        x2_mask = question padding mask        [batch * len_q]
+        x1 = document word indices                 [ batch * len_d]
+        x1_f = document word features indices      [ batch * len_d * nfeat]
+        x1_mask = document padding mask            [ batch * len_d]
+        x1_chars = document character indices      [ batch * len_d * len_c]
+        x1_chars_mask = document character indices [ batch * len_d * len_c]
+        x2 = question word indices                 [ batch * len_q]
+        x2_mask = question padding mask            [ batch * len_q]
+        x2_chars = document character indices      [ batch * len_q * len_c]
+        x2_chars_mask = document character indices [ batch * len_q * len_c]
         """
         # Embed both document and question
         x1_emb = self.embedding(x1)
         x2_emb = self.embedding(x2)
 
+        # checkpoint: to add charcter-level encoding
         # Dropout on embeddings
         if self.opt['dropout_emb'] > 0:
             x1_emb = nn.functional.dropout(x1_emb, p=self.opt['dropout_emb'],
@@ -126,7 +142,8 @@ class RnnDocReader(nn.Module):
             q_merge_weights = layers.uniform_weights(question_hiddens, x2_mask)
         elif self.opt['question_merge'] == 'self_attn':
             q_merge_weights = self.self_attn(question_hiddens, x2_mask)
-        question_hidden = layers.weighted_avg(question_hiddens, q_merge_weights)
+        question_hidden = layers.weighted_avg(question_hiddens,
+                                              q_merge_weights)
 
         # Predict start and end positions
         start_scores = self.start_attn(doc_hiddens, question_hidden, x1_mask)

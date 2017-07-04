@@ -4,10 +4,11 @@
 # LICENSE file in the root directory of this source tree. An additional grant
 # of patent rights can be found in the PATENTS file in the same directory.
 import torch
-import time
+# import time
 import unicodedata
 from collections import Counter
 import spacy
+import string
 
 NLP = spacy.load('en')
 pos_list = [
@@ -21,6 +22,9 @@ ner_list = [
 ]
 pos_dict = {i: pos_list.index(i)/len(pos_list) for i in pos_list}
 ner_dict = {i: ner_list.index(i)/len(ner_list) for i in ner_list}
+
+charset = string.ascii_letters + string.digits + string.punctuation
+char_dict = {i: charset.index(i) for i in charset}
 
 
 # ------------------------------------------------------------------------------
@@ -87,6 +91,12 @@ def vectorize(opt, ex, word_dict, feature_dict):
     # Index words
     document = torch.LongTensor([word_dict[w] for w in ex['document']])
     question = torch.LongTensor([word_dict[w] for w in ex['question']])
+    document_chars = [
+        torch.LongTensor([char_dict[i] for i in w]) for w in ex['document']
+    ]
+    question_chars = [
+        torch.LongTensor([char_dict[i] for i in w]) for w in ex['question']
+    ]
 
     # Create extra features vector
     features = torch.zeros(len(ex['document']), len(feature_dict))
@@ -157,13 +167,14 @@ def vectorize(opt, ex, word_dict, feature_dict):
 
     # Maybe return without target
     if ex['target'] is None:
-        return document, features, question
+        return document, document_chars, features, question, question_chars
 
     # ...or with target
     start = torch.LongTensor(1).fill_(ex['target'][0])
     end = torch.LongTensor(1).fill_(ex['target'][1])
 
-    return document, features, question, start, end
+    return document, document_chars, features, question, \
+        question_chars, start, end
 
 
 def batchify(batch, null=0, cuda=False):
@@ -171,14 +182,16 @@ def batchify(batch, null=0, cuda=False):
     Collate inputs into batches.
     generate input matrix and vector for batch.
     """
-    NUM_INPUTS = 3
+    NUM_INPUTS = 5
     NUM_TARGETS = 2
     NUM_EXTRA = 2
 
     # Get elements
     docs = [ex[0] for ex in batch]
-    features = [ex[1] for ex in batch]
-    questions = [ex[2] for ex in batch]
+    doc_chars = [ex[1] for ex in batch]
+    features = [ex[2] for ex in batch]
+    questions = [ex[3] for ex in batch]
+    question_chars = [ex[4] for ex in batch]
     text = [ex[-2] for ex in batch]
     spans = [ex[-1] for ex in batch]
     # we couldn't sure ex[3] and ex[4] is exist.
@@ -197,6 +210,20 @@ def batchify(batch, null=0, cuda=False):
         x1_f[i, :d.size(0)].copy_(features[i])
     # fill document matrix.
 
+    # Batch char docuemnt
+    max_char_length = max([max([c.size(0) for c in w]) for w in doc_chars])
+    x1_chars = torch.LongTensor(len(docs), max_length,
+                                max_char_length).fill_(null)
+    # (samples, doc_lengths(time_steps))
+    x1_chars_mask = torch.ByteTensor(len(docs), max_length,
+                                     max_char_length).fill_(1)
+    # (samples, doc_lengths(time_steps), features)
+    for i, d in enumerate(docs):
+        for j, c in enumerate(c):
+            x1_chars[i, j, :c.size(0)].copy_(c)
+            x1_chars_mask[i, j, :c.size(0)].fill_(0)
+    # fill document_chars matrix.
+
     # Batch questions
     max_length = max([q.size(0) for q in questions])
     x2 = torch.LongTensor(len(questions), max_length).fill_(null)
@@ -206,24 +233,45 @@ def batchify(batch, null=0, cuda=False):
         x2_mask[i, :q.size(0)].fill_(0)
     # fill question matrix.
 
+    # Batch char docuemnt
+    max_char_length = max(
+        [max([c.size(0) for c in w]) for w in question_chars])
+    x2_chars = torch.LongTensor(len(questions), max_length,
+                                max_char_length).fill_(null)
+    # (samples, doc_lengths(time_steps))
+    x2_chars_mask = torch.ByteTensor(len(questions), max_length,
+                                     max_char_length).fill_(1)
+    # (samples, doc_lengths(time_steps), features)
+    for i, d in enumerate(questions):
+        for j, c in enumerate(c):
+            x2_chars[i, j, :c.size(0)].copy_(c)
+            x2_chars_mask[i, j, :c.size(0)].fill_(0)
+    # fill question_chars matrix.
+
     # Pin memory if cuda
     if cuda:
         x1 = x1.pin_memory()
         # looks-like some memory optimize technicle
         x1_f = x1_f.pin_memory()
         x1_mask = x1_mask.pin_memory()
+        x1_chars = x1_chars.pin_memory()
+        x1_chars_mask = x1_chars_mask.pin_memory()
         x2 = x2.pin_memory()
         x2_mask = x2_mask.pin_memory()
+        x2_chars = x2_chars.pin_memory()
+        x2_chars_mask = x2_chars_mask.pin_memory()
 
     # Maybe return without targets
     if len(batch[0]) == NUM_INPUTS + NUM_EXTRA:
-        return x1, x1_f, x1_mask, x2, x2_mask, text, spans
+        return x1, x1_f, x1_mask, x1_chars, x1_chars_mask, x2, x2_mask, \
+                x2_chars, x2_chars_mask, text, spans
 
     # ...Otherwise add targets
     elif len(batch[0]) == NUM_INPUTS + NUM_EXTRA + NUM_TARGETS:
-        y_s = torch.cat([ex[3] for ex in batch])
-        y_e = torch.cat([ex[4] for ex in batch])
-        return x1, x1_f, x1_mask, x2, x2_mask, y_s, y_e, text, spans
+        y_s = torch.cat([ex[5] for ex in batch])
+        y_e = torch.cat([ex[6] for ex in batch])
+        return x1, x1_f, x1_mask, x1_chars, x1_chars_mask, x2, x2_mask, \
+            x2_chars, x2_chars_mask, y_s, y_e, text, spans
     # start-position and end position vector
 
     # ...Otherwise wrong number of inputs
