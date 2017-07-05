@@ -165,7 +165,7 @@ def main():
         agent = create_agent(opt)
 
     run_eval(agent, opt, 'valid')
-    run_eval(agent, opt, 'test')
+    # run_eval(agent, opt, 'test')
 
 
 if __name__ == '__main__':

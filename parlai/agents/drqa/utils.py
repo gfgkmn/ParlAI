@@ -91,6 +91,9 @@ def vectorize(opt, ex, word_dict, feature_dict):
     # Create extra features vector
     features = torch.zeros(len(ex['document']), len(feature_dict))
     # feature matrix, len(docuemnt) * len(feature) shape
+    with open('save_document.txt', 'a') as fp:
+        fp.write(' '.join(ex['document']) + '\n')
+        fp.write(' '.join(ex['question']) + '\n\n')
 
     spacy_doc = NLP(' '.join(ex['document']))
 
