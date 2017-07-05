@@ -34,10 +34,19 @@ def add_cmdline_args(parser):
                               'embedding_file is not given'))
     agent.add_argument('--hidden_size', type=int, default=128,
                         help='Hidden size of RNN units')
+    agent.add_argument('--char_embedding_dim', type=int, default=64,
+                        help=('Default character embedding size if '
+                              'character embedding_file is not given'))
+    agent.add_argument('--charemb_rnn_dim', type=int, default=128,
+                        help='Hidden size of char RNN units')
     agent.add_argument('--doc_layers', type=int, default=3,
                         help='Number of RNN layers for passage')
+    agent.add_argument('--doc_char_layers', type=int, default=1,
+                        help='Number of char RNN layers for passage')
     agent.add_argument('--question_layers', type=int, default=3,
                         help='Number of RNN layers for question')
+    agent.add_argument('--question_char_layers', type=int, default=1,
+                        help='Number of char RNN layers for question')
     agent.add_argument('--rnn_type', type=str, default='lstm',
                         help='RNN type: lstm (default), gru, or rnn')
 
@@ -53,10 +62,16 @@ def add_cmdline_args(parser):
                               <display_iter> epoches (default 10)')
     agent.add_argument('--dropout_emb', type=float, default=0.4,
                         help='Dropout rate for word embeddings')
+    agent.add_argument('--dropout_char_emb', type=float, default=0.2,
+                        help='Dropout rate for character embeddings')
     agent.add_argument('--dropout_rnn', type=float, default=0.4,
                         help='Dropout rate for RNN states')
     agent.add_argument('--dropout_rnn_output', type='bool', default=True,
                         help='Whether to dropout the RNN output')
+    agent.add_argument('--dropout_char_rnn', type=float, default=0.2,
+                        help='Dropout rate for char RNN states')
+    agent.add_argument('--dropout_char_rnn_output', type='bool', default=False,
+                        help='Whether to dropout the char RNN output')
     agent.add_argument('--optimizer', type=str, default='adamax',
                         help='Optimizer: sgd or adamax (default)')
     agent.add_argument('--learning_rate', '-lr', type=float, default=0.1,

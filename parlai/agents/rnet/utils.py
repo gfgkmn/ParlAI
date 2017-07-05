@@ -25,6 +25,7 @@ ner_dict = {i: ner_list.index(i)/len(ner_list) for i in ner_list}
 
 charset = string.ascii_letters + string.digits + string.punctuation
 char_dict = {i: charset.index(i) for i in charset}
+charvob_size = len(charset)
 
 
 # ------------------------------------------------------------------------------
@@ -123,30 +124,14 @@ def vectorize(opt, ex, word_dict, feature_dict):
     if opt['use_ner']:
         for i, w in enumerate(ex['document']):
             if spacy_doc[i].ent_type_:
-                try:
-                    features[i][feature_dict['ner_type']] = ner_dict[spacy_doc[
-                        i].ent_type_]
-                except KeyError:
-                    print('-' * 40)
-                    print('ner_error)')
-                    print(len(ex['document']))
-                    print(len(spacy_doc))
-                    print(spacy_doc[i].ent_type_)
-                    print('-' * 40)
+                features[i][feature_dict['ner_type']] = ner_dict[spacy_doc[
+                    i].ent_type_]
 
     if opt['use_pos']:
         for i, w in enumerate(ex['document']):
             if spacy_doc[i].pos_:
-                try:
-                    features[i][feature_dict['pos_type']] = pos_dict[spacy_doc[
-                        i].pos_]
-                except KeyError:
-                    print('-' * 40)
-                    print('pos error')
-                    print(len(ex['document']))
-                    print(len(spacy_doc))
-                    print(spacy_doc[i].pos_)
-                    print('-' * 40)
+                features[i][feature_dict['pos_type']] = pos_dict[spacy_doc[
+                    i].pos_]
 
     if opt['use_time'] > 0:
         # Counting from the end, each (full-stop terminated) sentence gets

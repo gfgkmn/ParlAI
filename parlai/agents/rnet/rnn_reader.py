@@ -6,6 +6,7 @@
 import torch
 import torch.nn as nn
 from . import layers
+from .utils import charvob_size
 
 
 class RnnDocReader(nn.Module):
@@ -22,8 +23,7 @@ class RnnDocReader(nn.Module):
                                       opt['embedding_dim'],
                                       padding_idx=padding_idx)
 
-        # todo add parameters into opt
-        self.char_embedding = nn.Embedding(opt['char_size'],
+        self.char_embedding = nn.Embedding(charvob_size,
                                            opt['char_embedding_dim'],
                                            padding_idx=padding_idx)
 
@@ -42,14 +42,27 @@ class RnnDocReader(nn.Module):
 
         # Projection for attention weighted question
         if opt['use_qemb']:
-            self.qemb_match = layers.SeqAttnMatch(opt['embedding_dim'])
+            self.qemb_match = layers.SeqAttnMatch(opt['embedding_dim'] +
+                                                  opt['charemb_rnn_dim'])
 
         # Input size to RNN: word emb + question emb + manual features
-        # todo add parameters into opt
         doc_input_size = opt['embedding_dim'] + opt['num_features'] + \
             opt['charemb_rnn_dim']
         if opt['use_qemb']:
             doc_input_size += opt['embedding_dim']
+
+        # RNN docuemnt character encoder
+        # todo may padding is needed, it's different with doc_rnn
+        self.doc_char_rnn = layers.StackedBRNN(
+            input_size=opt['char_embedding_dim'],
+            hidden_size=opt['charemb_rnn_dim'],
+            num_layers=opt['doc_char_layers'],
+            dropout_rate=opt['dropout_char_rnn'],
+            dropout_output=opt['dropout_char_rnn_output'],
+            concat_layers=False,
+            rnn_type=self.RNN_TYPES[opt['rnn_type']],
+            padding=opt['rnn_padding'],
+        )
 
         # RNN document encoder
         self.doc_rnn = layers.StackedBRNN(
@@ -59,6 +72,17 @@ class RnnDocReader(nn.Module):
             dropout_rate=opt['dropout_rnn'],
             dropout_output=opt['dropout_rnn_output'],
             concat_layers=opt['concat_rnn_layers'],
+            rnn_type=self.RNN_TYPES[opt['rnn_type']],
+            padding=opt['rnn_padding'],
+        )
+
+        self.question_char_rnn = layers.StackedBRNN(
+            input_size=opt['char_embedding_dim'],
+            hidden_size=opt['charemb_rnn_dim'],
+            num_layers=opt['question_char_layers'],
+            dropout_rate=opt['dropout_char_rnn'],
+            dropout_output=opt['dropout_char_rnn_output'],
+            concat_layers=False,
             rnn_type=self.RNN_TYPES[opt['rnn_type']],
             padding=opt['rnn_padding'],
         )
@@ -114,17 +138,52 @@ class RnnDocReader(nn.Module):
         x2_chars = document character indices      [ batch * len_q * len_c]
         x2_chars_mask = document character indices [ batch * len_q * len_c]
         """
+
+        x1_chars_size = x1_chars.size()
+        x2_chars_size = x2_chars.size()
+
+        x1_chars_emb = self.char_embedding(x1_chars.view(-1, x1_chars.size(-1)))
+        x2_chars_emb = self.char_embedding(x2_chars.view(-1, x2_chars.size(-1)))
+        # emb shape [batch * len_d , len_c, char_emb_dim]
+
+        # todo cache mechanism to cache same word charater-level encoding for
+        # computer just once in batch
+
+        # Dropout on character-level embeddings
+        if self.opt['dropout_char_emb'] > 0:
+            x1_chars_emb = nn.functional.dropout(
+                x1_chars_emb,
+                p=self.opt['dropout_char_emb'],
+                training=self.training)
+            x2_chars_emb = nn.functional.dropout(
+                x2_chars_emb,
+                p=self.opt['dropout_char_emb'],
+                training=self.training)
+
+        # character-level encoding
+        doc_char_encoding = self.doc_char_rnn(x1_chars_emb, x1_chars_mask)
+        question_char_encoding = self.question_char_rnn(
+            x2_chars_emb, x2_chars_mask)
+
+        doc_char_encoding = doc_char_encoding.view(
+            x1_chars_size[:-1] + doc_char_encoding.size()[-1:])
+        question_char_encoding = question_char_encoding.view(
+            x2_chars_size[:-1] + question_char_encoding.size()[-1:])
+
         # Embed both document and question
         x1_emb = self.embedding(x1)
         x2_emb = self.embedding(x2)
 
-        # checkpoint: to add charcter-level encoding
         # Dropout on embeddings
         if self.opt['dropout_emb'] > 0:
             x1_emb = nn.functional.dropout(x1_emb, p=self.opt['dropout_emb'],
                                            training=self.training)
             x2_emb = nn.functional.dropout(x2_emb, p=self.opt['dropout_emb'],
                                            training=self.training)
+
+        # concatenate word-level and character-level encoding
+        x1_emb = torch.cat([x1_emb, doc_char_encoding], 2)
+        x2_emb = torch.cat([x2_emb, question_char_encoding], 2)
 
         # Add attention-weighted question representation
         if self.opt['use_qemb']:
@@ -135,6 +194,8 @@ class RnnDocReader(nn.Module):
 
         # Encode document with RNN
         doc_hiddens = self.doc_rnn(drnn_input, x1_mask)
+        # todo maybe this is debug place
+        # print(doc_hiddens.size())
 
         # Encode question with RNN + merge hiddens
         question_hiddens = self.question_rnn(x2_emb, x2_mask)
