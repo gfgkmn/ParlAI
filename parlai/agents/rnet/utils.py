@@ -8,7 +8,6 @@ import torch
 import unicodedata
 from collections import Counter
 import spacy
-import string
 
 NLP = spacy.load('en')
 pos_list = [
@@ -23,8 +22,10 @@ ner_list = [
 pos_dict = {i: pos_list.index(i)/len(pos_list) for i in pos_list}
 ner_dict = {i: ner_list.index(i)/len(ner_list) for i in ner_list}
 
-charset = string.ascii_letters + string.digits + string.punctuation
-char_dict = {i: charset.index(i) for i in charset}
+# charset = string.ascii_letters + string.digits + string.punctuation
+charset = set([10] + list(range(32, 241))) - set(
+    [127, 192, 193, 211, 221, 222, 223, 238])
+# char_dict = {i: charset.index(i) for i in charset}
 charvob_size = len(charset)
 
 
@@ -93,10 +94,10 @@ def vectorize(opt, ex, word_dict, feature_dict):
     document = torch.LongTensor([word_dict[w] for w in ex['document']])
     question = torch.LongTensor([word_dict[w] for w in ex['question']])
     document_chars = [
-        torch.LongTensor([char_dict[i] for i in w]) for w in ex['document']
+        torch.LongTensor([ord(i) for i in w]) for w in ex['document']
     ]
     question_chars = [
-        torch.LongTensor([char_dict[i] for i in w]) for w in ex['question']
+        torch.LongTensor([ord(i) for i in w]) for w in ex['question']
     ]
 
     # Create extra features vector
@@ -179,7 +180,7 @@ def batchify(batch, null=0, cuda=False):
     question_chars = [ex[4] for ex in batch]
     text = [ex[-2] for ex in batch]
     spans = [ex[-1] for ex in batch]
-    # we couldn't sure ex[3] and ex[4] is exist.
+    # we couldn't sure ex[5] and ex[6] is exist.
 
     # Batch documents and features
     max_length = max([d.size(0) for d in docs])
@@ -203,8 +204,8 @@ def batchify(batch, null=0, cuda=False):
     x1_chars_mask = torch.ByteTensor(len(docs), max_length,
                                      max_char_length).fill_(1)
     # (samples, doc_lengths(time_steps), features)
-    for i, d in enumerate(docs):
-        for j, c in enumerate(c):
+    for i, d in enumerate(doc_chars):
+        for j, c in enumerate(d):
             x1_chars[i, j, :c.size(0)].copy_(c)
             x1_chars_mask[i, j, :c.size(0)].fill_(0)
     # fill document_chars matrix.
@@ -227,8 +228,8 @@ def batchify(batch, null=0, cuda=False):
     x2_chars_mask = torch.ByteTensor(len(questions), max_length,
                                      max_char_length).fill_(1)
     # (samples, doc_lengths(time_steps), features)
-    for i, d in enumerate(questions):
-        for j, c in enumerate(c):
+    for i, d in enumerate(question_chars):
+        for j, c in enumerate(d):
             x2_chars[i, j, :c.size(0)].copy_(c)
             x2_chars_mask[i, j, :c.size(0)].fill_(0)
     # fill question_chars matrix.

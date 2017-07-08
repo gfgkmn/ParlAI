@@ -87,13 +87,13 @@ class DocReaderModel(object):
 
         # Transfer to GPU
         if self.opt['cuda']:
-            inputs = [Variable(e.cuda(async=True)) for e in ex[:5]]
-            target_s = Variable(ex[5].cuda(async=True))
-            target_e = Variable(ex[6].cuda(async=True))
+            inputs = [Variable(e.cuda(async=True)) for e in ex[:9]]
+            target_s = Variable(ex[9].cuda(async=True))
+            target_e = Variable(ex[10].cuda(async=True))
         else:
-            inputs = [Variable(e) for e in ex[:5]]
-            target_s = Variable(ex[5])
-            target_e = Variable(ex[6])
+            inputs = [Variable(e) for e in ex[:9]]
+            target_s = Variable(ex[9])
+            target_e = Variable(ex[10])
 
         # Run forward
         score_s, score_e = self.network(*inputs)
@@ -124,9 +124,9 @@ class DocReaderModel(object):
         # Transfer to GPU
         if self.opt['cuda']:
             inputs = [Variable(e.cuda(async=True), volatile=True)
-                      for e in ex[:5]]
+                      for e in ex[:9]]
         else:
-            inputs = [Variable(e, volatile=True) for e in ex[:5]]
+            inputs = [Variable(e, volatile=True) for e in ex[:9]]
 
         # Run forward
         score_s, score_e = self.network(*inputs)
