@@ -17,7 +17,7 @@ from torch.autograd import Variable
 class StackedBRNN(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers,
                  dropout_rate=0, dropout_output=False, rnn_type=nn.LSTM,
-                 concat_layers=False, padding=False):
+                 concat_layers=False, padding=False, return_hidden=False):
         super(StackedBRNN, self).__init__()
         self.padding = padding
         self.dropout_output = dropout_output
@@ -25,6 +25,7 @@ class StackedBRNN(nn.Module):
         self.num_layers = num_layers
         self.concat_layers = concat_layers
         self.rnns = nn.ModuleList()
+        self.return_hidden = return_hidden
         for i in range(num_layers):
             input_size = input_size if i == 0 else 2 * hidden_size
             self.rnns.append(rnn_type(input_size, hidden_size,
@@ -51,6 +52,7 @@ class StackedBRNN(nn.Module):
 
         # Encode all layers
         outputs = [x]
+        output_hiddens = []
         for i in range(self.num_layers):
             rnn_input = outputs[-1]
 
@@ -60,8 +62,16 @@ class StackedBRNN(nn.Module):
                                       p=self.dropout_rate,
                                       training=self.training)
             # Forward
-            rnn_output = self.rnns[i](rnn_input)[0]
+            rnn_output, rnn_last_hidden = self.rnns[i](rnn_input)
             outputs.append(rnn_output)
+            output_hiddens.append(rnn_last_hidden)
+            # rnn_last_hidden torch.size (2, 174, 128)
+            # 2 bidirectional, 174 batch * len_w, 128 char_rnn hidden_size
+
+        # todo deal with lstm gru and other network
+        output_hiddens = torch.cat(
+            [output_hiddens[0][0][0], output_hiddens[0][0][1]], 1)
+        # index [0][0][0]: first layer result.  fetch h0. fetch forward
 
         # Concat hidden layers
         if self.concat_layers:
@@ -77,11 +87,15 @@ class StackedBRNN(nn.Module):
             output = F.dropout(output,
                                p=self.dropout_rate,
                                training=self.training)
-        return output
+        if self.return_hidden:
+            return output_hiddens
+        else:
+            return output
 
     def _forward_padded(self, x, x_mask):
         """Slower (significantly), but more precise,
         encoding that handles padding."""
+        # todo deal with char_rnn padding version
         # Compute sorted sequence lengths
         lengths = x_mask.data.eq(0).long().sum(1).squeeze()
         _, idx_sort = torch.sort(lengths, dim=0, descending=True)
@@ -112,7 +126,8 @@ class StackedBRNN(nn.Module):
                                           training=self.training)
                 rnn_input = nn.utils.rnn.PackedSequence(dropout_input,
                                                         rnn_input.batch_sizes)
-            outputs.append(self.rnns[i](rnn_input)[0])
+            rnn_output, rnn_last_hidden = self.rnns[i](rnn_input)
+            outputs.append(rnn_output)
 
         # Unpack everything
         for i, o in enumerate(outputs[1:], 1):

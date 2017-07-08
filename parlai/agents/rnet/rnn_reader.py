@@ -40,17 +40,6 @@ class RnnDocReader(nn.Module):
             ))
             self.register_buffer('fixed_embedding', torch.Tensor(buffer_size))
 
-        # Projection for attention weighted question
-        if opt['use_qemb']:
-            self.qemb_match = layers.SeqAttnMatch(opt['embedding_dim'] +
-                                                  opt['charemb_rnn_dim'])
-
-        # Input size to RNN: word emb + question emb + manual features
-        doc_input_size = opt['embedding_dim'] + opt['num_features'] + \
-            opt['charemb_rnn_dim']
-        if opt['use_qemb']:
-            doc_input_size += opt['embedding_dim']
-
         # RNN docuemnt character encoder
         # todo may padding is needed, it's different with doc_rnn
         self.doc_char_rnn = layers.StackedBRNN(
@@ -62,7 +51,31 @@ class RnnDocReader(nn.Module):
             concat_layers=False,
             rnn_type=self.RNN_TYPES[opt['rnn_type']],
             padding=opt['rnn_padding'],
+            return_hidden=True
         )
+
+        self.question_char_rnn = layers.StackedBRNN(
+            input_size=opt['char_embedding_dim'],
+            hidden_size=opt['charemb_rnn_dim'],
+            num_layers=opt['question_char_layers'],
+            dropout_rate=opt['dropout_char_rnn'],
+            dropout_output=opt['dropout_char_rnn_output'],
+            concat_layers=False,
+            rnn_type=self.RNN_TYPES[opt['rnn_type']],
+            padding=opt['rnn_padding'],
+            return_hidden=True
+        )
+
+        # Projection for attention weighted question
+        if opt['use_qemb']:
+            self.qemb_match = layers.SeqAttnMatch(opt['embedding_dim'] +
+                                                  opt['charemb_rnn_dim'] * 2)
+
+        # Input size to RNN: word emb + question emb + manual features
+        doc_input_size = opt['embedding_dim'] + opt['num_features'] + \
+            opt['charemb_rnn_dim'] * 2
+        if opt['use_qemb']:
+            doc_input_size += opt['embedding_dim'] + opt['charemb_rnn_dim'] * 2
 
         # RNN document encoder
         self.doc_rnn = layers.StackedBRNN(
@@ -76,18 +89,7 @@ class RnnDocReader(nn.Module):
             padding=opt['rnn_padding'],
         )
 
-        self.question_char_rnn = layers.StackedBRNN(
-            input_size=opt['char_embedding_dim'],
-            hidden_size=opt['charemb_rnn_dim'],
-            num_layers=opt['question_char_layers'],
-            dropout_rate=opt['dropout_char_rnn'],
-            dropout_output=opt['dropout_char_rnn_output'],
-            concat_layers=False,
-            rnn_type=self.RNN_TYPES[opt['rnn_type']],
-            padding=opt['rnn_padding'],
-        )
-
-        question_input_size = opt['embedding_dim'] + opt['charemb_rnn_dim']
+        question_input_size = opt['embedding_dim'] + opt['charemb_rnn_dim'] * 2
 
         # RNN question encoder
         self.question_rnn = layers.StackedBRNN(
@@ -142,8 +144,12 @@ class RnnDocReader(nn.Module):
         x1_chars_size = x1_chars.size()
         x2_chars_size = x2_chars.size()
 
-        x1_chars_emb = self.char_embedding(x1_chars.view(-1, x1_chars.size(-1)))
-        x2_chars_emb = self.char_embedding(x2_chars.view(-1, x2_chars.size(-1)))
+        # todo current batch must == 1, otherwise the long sequence last word
+        # will be all zero.
+        x1_chars_emb = self.char_embedding(
+            x1_chars.view(-1, x1_chars.size(-1)))
+        x2_chars_emb = self.char_embedding(
+            x2_chars.view(-1, x2_chars.size(-1)))
         # emb shape [batch * len_d , len_c, char_emb_dim]
 
         # todo cache mechanism to cache same word charater-level encoding for
