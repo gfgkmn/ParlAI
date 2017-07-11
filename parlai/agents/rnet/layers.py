@@ -87,6 +87,7 @@ class StackedBRNN(nn.Module):
             output = F.dropout(output,
                                p=self.dropout_rate,
                                training=self.training)
+        # todo if just return hidden state, is it necessary ?
         if self.return_hidden:
             return output_hiddens
         else:
@@ -116,6 +117,7 @@ class StackedBRNN(nn.Module):
 
         # Encode all layers
         outputs = [rnn_input]
+        output_hiddens = []
         for i in range(self.num_layers):
             rnn_input = outputs[-1]
 
@@ -128,6 +130,10 @@ class StackedBRNN(nn.Module):
                                                         rnn_input.batch_sizes)
             rnn_output, rnn_last_hidden = self.rnns[i](rnn_input)
             outputs.append(rnn_output)
+            output_hiddens.append(rnn_last_hidden)
+
+        output_hiddens = torch.cat(
+            [output_hiddens[0][0][0], output_hiddens[0][0][1]], 1)
 
         # Unpack everything
         for i, o in enumerate(outputs[1:], 1):
@@ -148,7 +154,10 @@ class StackedBRNN(nn.Module):
             output = F.dropout(output,
                                p=self.dropout_rate,
                                training=self.training)
-        return output
+        if self.return_hidden:
+            return output_hiddens
+        else:
+            return output
 
 
 class SeqAttnMatch(nn.Module):

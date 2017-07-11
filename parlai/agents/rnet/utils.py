@@ -8,6 +8,7 @@ import torch
 import unicodedata
 from collections import Counter
 import spacy
+import sys
 
 NLP = spacy.load('en')
 pos_list = [
@@ -23,9 +24,10 @@ pos_dict = {i: pos_list.index(i)/len(pos_list) for i in pos_list}
 ner_dict = {i: ner_list.index(i)/len(ner_list) for i in ner_list}
 
 # charset = string.ascii_letters + string.digits + string.punctuation
-charset = set([10] + list(range(32, 241))) - set(
+charset = set([0, 10, 8211, 257] + list(range(32, 241))) - set(
     [127, 192, 193, 211, 221, 222, 223, 238])
-# char_dict = {i: charset.index(i) for i in charset}
+charset = list(charset)
+char_dict = {i: charset.index(i) for i in charset}
 charvob_size = len(charset)
 
 
@@ -94,10 +96,16 @@ def vectorize(opt, ex, word_dict, feature_dict):
     document = torch.LongTensor([word_dict[w] for w in ex['document']])
     question = torch.LongTensor([word_dict[w] for w in ex['question']])
     document_chars = [
-        torch.LongTensor([ord(i) for i in w]) for w in ex['document']
+        torch.LongTensor([
+            char_dict[ord(i)] if ord(i) in char_dict else char_dict[0]
+            for i in w
+        ]) for w in ex['document']
     ]
     question_chars = [
-        torch.LongTensor([ord(i) for i in w]) for w in ex['question']
+        torch.LongTensor([
+            char_dict[ord(i)] if ord(i) in char_dict else char_dict[0]
+            for i in w
+        ]) for w in ex['question']
     ]
 
     # Create extra features vector

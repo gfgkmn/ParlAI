@@ -150,6 +150,8 @@ class RnnDocReader(nn.Module):
             x1_chars.view(-1, x1_chars.size(-1)))
         x2_chars_emb = self.char_embedding(
             x2_chars.view(-1, x2_chars.size(-1)))
+        x1_chars_mask = x1_chars_mask.view(-1, x1_chars_mask.size(-1))
+        x2_chars_mask = x2_chars_mask.view(-1, x2_chars_mask.size(-1))
         # emb shape [batch * len_d , len_c, char_emb_dim]
 
         # todo cache mechanism to cache same word charater-level encoding for
@@ -200,7 +202,6 @@ class RnnDocReader(nn.Module):
 
         # Encode document with RNN
         doc_hiddens = self.doc_rnn(drnn_input, x1_mask)
-        # todo maybe this is debug place
         # print(doc_hiddens.size())
 
         # Encode question with RNN + merge hiddens

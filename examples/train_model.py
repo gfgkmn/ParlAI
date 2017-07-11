@@ -100,15 +100,6 @@ def main():
                         help='build dictionary first before training agent')
     opt = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO)
-    data_logger = logging.getLogger('datalogger')
-    fh = logging.FileHandler('%s.log' % opt['model'])
-    fh.setLevel(logging.INFO)
-    formatter = logging.Formatter(
-                '%(asctime)s - %(levelname)s       %(message)s'
-            )
-    fh.setFormatter(formatter)
-    data_logger.addHandler(fh)
 
     # Possibly build a dictionary (not all models do this).
     if opt['dict_build_first'] and 'dict_file' in opt:
@@ -163,9 +154,10 @@ def main():
                 train_report = world.report()
                 world.reset_metrics()
 
-            if hasattr(train_report, 'get') and train_report.get('total'):
-                total_exs += train_report['total']
-                logs.append('total_exs:{}'.format(total_exs))
+            # if hasattr(train_report, 'get') and train_report.get('total'):
+            #     total_exs += train_report['total']
+            #     logs.append('total_exs:{}'.format(total_exs))
+            total_exs += 1
 
             # check if we should log amount of time remaining
             time_left = None
@@ -221,4 +213,14 @@ def main():
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    data_logger = logging.getLogger('datalogger')
+    fh = logging.FileHandler('rnet.log')
+    fh.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+                '%(asctime)s - %(levelname)s       %(message)s'
+            )
+    fh.setFormatter(formatter)
+    data_logger.addHandler(fh)
+
     main()
