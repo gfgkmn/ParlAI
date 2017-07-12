@@ -50,7 +50,8 @@ class RnnDocReader(nn.Module):
             dropout_output=opt['dropout_char_rnn_output'],
             concat_layers=False,
             rnn_type=self.RNN_TYPES[opt['rnn_type']],
-            padding=opt['rnn_padding'],
+            # padding=opt['rnn_padding'],
+            padding=True,
             return_hidden=True
         )
 
@@ -62,7 +63,8 @@ class RnnDocReader(nn.Module):
             dropout_output=opt['dropout_char_rnn_output'],
             concat_layers=False,
             rnn_type=self.RNN_TYPES[opt['rnn_type']],
-            padding=opt['rnn_padding'],
+            # padding=opt['rnn_padding'],
+            padding=True,
             return_hidden=True
         )
 
