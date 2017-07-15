@@ -30,8 +30,15 @@ def _path(opt):
 class KBTeacher(FbDialogTeacher):
     def __init__(self, opt, shared=None):
         build(opt)
-        task = opt.get('task', 'wikimovies:KB:kb')
-        kb = task.split(':')[2]
+        task = opt.get('task')
+        if not task:
+            task = 'wikimovies:KB:kb'
+        kb = task.split(':')
+        if len(kb) == 3:
+            kb = kb[2]
+        elif len(kb) == 2:
+            # default to 'kb' if 'kb', 'wiki', or 'ie' not specified
+            kb = 'kb'
         kbs = {}
         kbs['kb'] = os.path.join('wiki_entities', 'wiki_entities_kb.txt')
         kbs['wiki'] = 'wiki.txt'
