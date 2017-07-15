@@ -206,6 +206,13 @@ class World(object):
         for a in self.agents:
             a.reset_metrics()
 
+    def save_agents(self):
+        """Saves all of the agents in the world by calling their respective
+        save() methods.
+        """
+        for a in self.agents:
+            a.save()
+
     def synchronize(self):
         """Can be used to synchronize processes."""
         pass
@@ -316,6 +323,7 @@ class MultiAgentDialogWorld(World):
         return self.agents[0].report()
 
     def shutdown(self):
+        """Shutdown each agent."""
         for a in self.agents:
             a.shutdown()
 
@@ -489,6 +497,10 @@ class MultiWorld(World):
         for w in self.worlds:
             w.reset_metrics()
 
+    def save_agents(self):
+        # Assumes all worlds have same agents, picks first to save.
+        self.worlds[0].save_agents()
+
 
 def override_opts_in_shared(table, overrides):
     """Looks recursively for ``opt`` dictionaries within shared dict and overrides
@@ -573,9 +585,9 @@ class BatchWorld(World):
             # notice this a is class agent so is is_shared = false
             # Store the actions locally in each world.
             # use class agent do action simultanously
-            for w in self.worlds:
+            for i, w in enumerate(self.worlds):
                 acts = w.get_acts()
-                acts[index] = batch_actions[index]
+                acts[index] = batch_actions[i]
         else:
             # Reverts to running on each individually.
             batch_actions = []
@@ -633,16 +645,25 @@ class BatchWorld(World):
         return True
 
     def report(self):
-        # insteresting, just report world 0 report.
-        # report about first batch sample ?
-        return self.worlds[0].report()
+        return self.world.report()
 
     def reset(self):
         for w in self.worlds:
             w.reset()
 
     def reset_metrics(self):
-        self.worlds[0].reset_metrics()
+        self.world.reset_metrics()
+
+    def save_agents(self):
+        # Because all worlds share the same parameters through sharing, saving
+        # one copy would suffice
+        self.world.save_agents()
+
+    def shutdown(self):
+        """Shutdown each world."""
+        for w in self.worlds:
+            w.shutdown()
+        self.world.shutdown()
 
 
 class HogwildProcess(Process):
@@ -740,6 +761,9 @@ class HogwildWorld(World):
 
     def report(self):
         return self.inner_world.report()
+
+    def save_agents(self):
+        self.inner_world.save_agents()
 
     def synchronize(self):
         """Sync barrier: will wait until all queued examples are processed."""

@@ -23,7 +23,7 @@ def main():
     from parlai.agents.ir_baseline.ir_baseline import IrBaselineAgent
     IrBaselineAgent.add_cmdline_args(argparser)
     opt = argparser.parse_args()
-    opt['task'] = os.path.basename(os.getcwd())
+    opt['task'] = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
     opt.update(task_config)
 
     # The task that we will evaluate the dialog model on
@@ -32,12 +32,13 @@ def main():
     task_opt['datapath'] = opt['datapath']
     task_opt['task'] = '#MovieDD-Reddit'
 
-    mturk_manager = MTurkManager()
-    mturk_manager.init_aws(opt=opt)
-
     mturk_agent_id = 'Worker'
-    mturk_manager.mturk_agent_ids = [mturk_agent_id]
-    mturk_manager.all_agent_ids = [ModelEvaluatorWorld.evaluator_agent_id, mturk_agent_id] # In speaking order
+    mturk_manager = MTurkManager(
+        opt=opt,
+        mturk_agent_ids = [mturk_agent_id],
+        all_agent_ids = [ModelEvaluatorWorld.evaluator_agent_id, mturk_agent_id] # In speaking order
+    )
+    mturk_manager.init_aws(opt=opt)
     
     global run_hit
     def run_hit(hit_index, assignment_index, opt, task_opt, mturk_manager):
@@ -51,12 +52,12 @@ def main():
         while not world.episode_done():
             world.parley()
         world.shutdown()
+        world.review_work()
 
     mturk_manager.create_hits(opt=opt)
     results = Parallel(n_jobs=opt['num_hits'] * opt['num_assignments'], backend='threading') \
                 (delayed(run_hit)(hit_index, assignment_index, opt, task_opt, mturk_manager) \
                     for hit_index, assignment_index in product(range(1, opt['num_hits']+1), range(1, opt['num_assignments']+1)))    
-    mturk_manager.review_hits()
     mturk_manager.shutdown()
 
 if __name__ == '__main__':
