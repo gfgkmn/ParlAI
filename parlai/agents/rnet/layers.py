@@ -17,7 +17,7 @@ from torch.autograd import Variable
 class StackedBRNN(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers,
                  dropout_rate=0, dropout_output=False, rnn_type=nn.LSTM,
-                 concat_layers=False, padding=False, return_hidden=False):
+                 concat_layers=False, padding=False, char_level=False):
         super(StackedBRNN, self).__init__()
         self.padding = padding
         self.dropout_output = dropout_output
@@ -25,7 +25,7 @@ class StackedBRNN(nn.Module):
         self.num_layers = num_layers
         self.concat_layers = concat_layers
         self.rnns = nn.ModuleList()
-        self.return_hidden = return_hidden
+        self.char_level = char_level
         for i in range(num_layers):
             input_size = input_size if i == 0 else 2 * hidden_size
             self.rnns.append(rnn_type(input_size, hidden_size,
@@ -88,7 +88,7 @@ class StackedBRNN(nn.Module):
                                p=self.dropout_rate,
                                training=self.training)
         # todo if just return hidden state, is it necessary ?
-        if self.return_hidden:
+        if self.char_level:
             return output_hiddens
         else:
             return output
@@ -105,6 +105,19 @@ class StackedBRNN(nn.Module):
         lengths = list(lengths[idx_sort])
         idx_sort = Variable(idx_sort)
         idx_unsort = Variable(idx_unsort)
+
+        if self.char_level:
+            batch_size = x_mask.size(0)
+            origin_idx_sort = idx_sort
+            zeros_indexs = [
+                i for i, v in enumerate(lengths) if v == 0
+            ]
+            if zeros_indexs:
+                first_zero_index = zeros_indexs[0]
+            else:
+                first_zero_index = len(origin_idx_sort)
+            idx_sort = origin_idx_sort[:first_zero_index]
+            lengths = lengths[:first_zero_index]
 
         # Sort x
         x = x.index_select(0, idx_sort)
@@ -145,18 +158,23 @@ class StackedBRNN(nn.Module):
         else:
             output = outputs[-1]
 
-        # Transpose and unsort
-        output = output.transpose(0, 1)
-        output = output.index_select(0, idx_unsort)
-
-        # Dropout on output layer
-        if self.dropout_output and self.dropout_rate > 0:
-            output = F.dropout(output,
-                               p=self.dropout_rate,
-                               training=self.training)
-        if self.return_hidden:
+        if self.char_level:
+            output_hiddens = Variable(
+                torch.cat((output_hiddens.data, torch.zeros(
+                    batch_size - first_zero_index, output_hiddens.size(-1))
+                           .cuda())))
+            output_hiddens = output_hiddens.index_select(0, idx_unsort)
             return output_hiddens
         else:
+            # Transpose and unsort
+            output = output.transpose(0, 1)
+            output = output.index_select(0, idx_unsort)
+
+            # Dropout on output layer
+            if self.dropout_output and self.dropout_rate > 0:
+                output = F.dropout(output,
+                                   p=self.dropout_rate,
+                                   training=self.training)
             return output
 
 

@@ -52,7 +52,7 @@ class RnnDocReader(nn.Module):
             rnn_type=self.RNN_TYPES[opt['rnn_type']],
             # padding=opt['rnn_padding'],
             padding=True,
-            return_hidden=True
+            char_level=True
         )
 
         self.question_char_rnn = layers.StackedBRNN(
@@ -65,7 +65,7 @@ class RnnDocReader(nn.Module):
             rnn_type=self.RNN_TYPES[opt['rnn_type']],
             # padding=opt['rnn_padding'],
             padding=True,
-            return_hidden=True
+            char_level=True
         )
 
         # Projection for attention weighted question

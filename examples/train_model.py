@@ -131,6 +131,9 @@ def main():
         world.parley()
         parleys += 1
 
+        if parleys == 2:
+            run_eval(agent, opt, 'test')
+
         if opt['num_epochs'] > 0 and parleys >= max_parleys:
             print('[ num_epochs completed: {} ]'.format(opt['num_epochs']))
             break
