@@ -34,10 +34,10 @@ def add_cmdline_args(parser):
                               'embedding_file is not given'))
     agent.add_argument('--hidden_size', type=int, default=128,
                         help='Hidden size of RNN units')
-    agent.add_argument('--char_embedding_dim', type=int, default=64,
+    agent.add_argument('--char_embedding_dim', type=int, default=32,
                         help=('Default character embedding size if '
                               'character embedding_file is not given'))
-    agent.add_argument('--charemb_rnn_dim', type=int, default=48,
+    agent.add_argument('--charemb_rnn_dim', type=int, default=32,
                         help='Hidden size of char RNN units')
     agent.add_argument('--doc_layers', type=int, default=3,
                         help='Number of RNN layers for passage')
