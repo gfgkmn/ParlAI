@@ -111,8 +111,8 @@ class DrqaAgent(Agent):
         DrqaAgent.dictionary_class().add_cmdline_args(argparser)
         # dictionary_class is SimpleDictionaryAgent so support other diction_class
         # so every model have three part of config. for task config.
-        # for model config, and for data config. so you split it. 
-        # and then you add these config to argparser. 
+        # for model config, and for data config. so you split it.
+        # and then you add these config to argparser.
 
     @staticmethod
     def dictionary_class():
@@ -282,6 +282,8 @@ class DrqaAgent(Agent):
         inputs['document'] = self.word_dict.tokenize(document)
         inputs['question'] = self.word_dict.tokenize(question)
         inputs['target'] = None
+        token_doc = inputs['document']
+        token_ques = inputs['question']
 
         # Find targets (if labels provided).
         # Return if we were unable to find an answer.
@@ -296,7 +298,7 @@ class DrqaAgent(Agent):
         # return document, features, question, start, end all torch.LongTensor
 
         # Return inputs with original text + spans (keep for prediction)
-        return inputs + (document, self.word_dict.span_tokenize(document))
+        return inputs + (token_doc, token_ques, document, self.word_dict.span_tokenize(document))
 
     def _find_target(self, document, labels):
         """Find the start/end token span for all labels in document.

@@ -178,8 +178,10 @@ class SeqAttnMatch(nn.Module):
         alpha = alpha_flat.view(-1, x.size(1), y.size(1))
 
         # Take weighted average
+        for_show = alpha
+        for_show = for_show.transpose(1, 2)
         matched_seq = alpha.bmm(y)
-        return matched_seq
+        return matched_seq, for_show
 
 
 class BilinearSeqAttn(nn.Module):

@@ -82,6 +82,8 @@ def add_cmdline_args(parser):
                         help='Whether to use pos features')
     agent.add_argument('--use_ner', type='bool', default=True,
                         help='Whether to use ner features')
+    agent.add_argument('--visualize_attention', type='bool', default=False,
+                        help='Whether to visualize attention when predice')
     agent.add_argument('--use_time', type=int, default=0,
                         help='Time features marking how recent word was said')
 
