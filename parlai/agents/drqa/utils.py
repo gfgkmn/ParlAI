@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree. An additional grant
 # of patent rights can be found in the PATENTS file in the same directory.
 import torch
-import time
+# import time
 import unicodedata
 from collections import Counter
 import spacy
@@ -173,12 +173,14 @@ def batchify(batch, null=0, cuda=False):
     """
     NUM_INPUTS = 3
     NUM_TARGETS = 2
-    NUM_EXTRA = 2
+    NUM_EXTRA = 4
 
     # Get elements
     docs = [ex[0] for ex in batch]
     features = [ex[1] for ex in batch]
     questions = [ex[2] for ex in batch]
+    token_ques = [ex[-3] for ex in batch]
+    token_doc = [ex[-4] for ex in batch]
     text = [ex[-2] for ex in batch]
     spans = [ex[-1] for ex in batch]
     # we couldn't sure ex[3] and ex[4] is exist.
@@ -217,13 +219,15 @@ def batchify(batch, null=0, cuda=False):
 
     # Maybe return without targets
     if len(batch[0]) == NUM_INPUTS + NUM_EXTRA:
-        return x1, x1_f, x1_mask, x2, x2_mask, text, spans
+        return x1, x1_f, x1_mask, x2, x2_mask, token_doc, token_ques,\
+            text, spans
 
     # ...Otherwise add targets
     elif len(batch[0]) == NUM_INPUTS + NUM_EXTRA + NUM_TARGETS:
         y_s = torch.cat([ex[3] for ex in batch])
         y_e = torch.cat([ex[4] for ex in batch])
-        return x1, x1_f, x1_mask, x2, x2_mask, y_s, y_e, text, spans
+        return x1, x1_f, x1_mask, x2, x2_mask, y_s, y_e, token_doc, \
+            token_ques, text, spans
     # start-position and end position vector
 
     # ...Otherwise wrong number of inputs

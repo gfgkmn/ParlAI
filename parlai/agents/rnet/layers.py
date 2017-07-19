@@ -96,7 +96,6 @@ class StackedBRNN(nn.Module):
     def _forward_padded(self, x, x_mask):
         """Slower (significantly), but more precise,
         encoding that handles padding."""
-        # todo deal with char_rnn padding version
         # Compute sorted sequence lengths
         lengths = x_mask.data.eq(0).long().sum(1).squeeze()
         _, idx_sort = torch.sort(lengths, dim=0, descending=True)
@@ -275,9 +274,94 @@ class LinearSeqAttn(nn.Module):
         return alpha
 
 
-# ------------------------------------------------------------------------------
-# Functional
-# ------------------------------------------------------------------------------
+class GatedMatchRNN(nn.Module):
+    """
+    Gated Match RNN, Given sequence X and Y match sequence Y to each element in
+    X
+    * s[t][j] = V_t * tanh(W_uq * u_q[j] + W_up * u_p[t] + W_vp * h[t-1])
+    * a[t][i] = exp(s[t][i]) / sum(exp(s[t]))
+    * c[t] = sum(a[t][i] * u_q[i])
+    *
+    * g[t] = sigmoid(W_g * concat(u_p[t]; c[t]))
+    * u_p[t], c[t] = g[t] * concat(u_p[t]; c[t]))
+
+    * h[t] = rnn(h[t-1], concat(u_p[t]; c[t]))
+    """
+
+    def __init__(self,
+                 input_size,
+                 dropout_rate=0,
+                 dropout_output=False,
+                 rnn_type=nn.LSTM,
+                 is_bidirectional=False):
+        # according to rnet papaer, gated-match-lstm hidden size must equal to
+        # input size
+        super(GatedMatchRNN, self).__init__()
+        self.dropout_output = dropout_output
+        self.dropout_rate = dropout_rate
+        self.hidden_state_size = input_size
+        self.W_q = nn.Linear(input_size, input_size)
+        self.W_up = nn.Linear(input_size, input_size)
+        self.W_vp = nn.Linear(input_size, input_size)
+        self.V = nn.Linear(input_size, 1)
+        self.W_g = nn.Linear(2 * input_size, 2 * input_size)
+        self.rnn = rnn_type(
+            2 * input_size,
+            input_size,
+            1,
+            bidirectional=is_bidirectional,
+            batch_first=True)
+
+    # def forward(self, x, y, y_mask):
+    def forward(self, x, y):
+        """Input shapes:
+            x = batch * len1 * h
+            y = batch * len2 * h
+            y_mask = batch * len2
+        Output shapes:
+            matched_seq = batch * len1 * h
+        """
+        # todo when to use padded sentence and add padding version
+        h = Variable(torch.zeros([1, self.hidden_state_size]))
+        # c = self.initial_hidden_state()
+        # compute ct for match lstm cell state
+
+        # here
+        x_proj = self.W_up(x.view(-1, x.size(2))).view(x.size())
+        # batch * len1  * h
+        y_proj = self.W_q(y.view(-1, y.size(2))).view(y.size())
+        # batch * len2 * h
+        hidden_proj = self.W_vp(h)
+        x_batch = x_proj.unsqueeze(2).repeat(1, 1, y.size(1), 1)
+        y_batch = y_proj.unsqueeze(1).repeat(1, x.size(1), 1, 1)
+        h_batch = hidden_proj.unsqueeze(0).unsqueeze(0).repeat(
+            x.size(0), x.size(1), y.size(1), 1)
+        sum_batch = torch.tanh(x_batch + y_batch + h_batch)
+        s = self.V(sum_batch.view(-1, sum_batch.size(-1))).view(
+            sum_batch.size()[:-1])
+        # batch * len1 * len2
+        alpha = F.softmax(s.view(-1, s.size(-1))).view(s.size())
+        ct = torch.bmm(alpha, y)
+        # batch * len1 * len2 --- batch * len2 * h == batch * len1 * h
+
+        merge_input = torch.cat((x, ct), 2)
+        gt = F.sigmoid(
+            self.W_g(
+                merge_input.view(-1, merge_input.size(-1))).view(
+                    merge_input.size()))
+        lstm_input = torch.mul(gt, torch.cat((x, ct), 2))
+        output, ouput_hidden = self.rnn(lstm_input)
+
+        if self.dropout_output and self.dropout_rate > 0:
+            output = F.dropout(output,
+                               p=self.dropout_rate,
+                               training=self.training)
+
+        return output
+
+    # ------------------------------------------------------------------------------
+    # Functional
+    # ------------------------------------------------------------------------------
 
 
 def uniform_weights(x, x_mask):

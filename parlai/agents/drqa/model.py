@@ -8,10 +8,14 @@ import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
 import logging
+import math
 
 from torch.autograd import Variable
 from .utils import load_embeddings, AverageMeter
 from .rnn_reader import RnnDocReader
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import seaborn as sns
 
 logger = logging.getLogger('DrQA')
 
@@ -129,7 +133,8 @@ class DocReaderModel(object):
             inputs = [Variable(e, volatile=True) for e in ex[:5]]
 
         # Run forward
-        score_s, score_e = self.network(*inputs)
+        score_s, score_e, atten_softmax, q_merge_weights = self.network(
+            *inputs)
 
         # Transfer to CPU/normal tensors for numpy ops
         score_s = score_s.data.cpu()
@@ -147,6 +152,74 @@ class DocReaderModel(object):
             s_idx, e_idx = np.unravel_index(np.argmax(scores), scores.shape)
             s_offset, e_offset = spans[i][s_idx][0], spans[i][e_idx][1]
             predictions.append(text[i][s_offset:e_offset])
+
+            if self.opt['visualize_attention']:
+                # visualize question-aware document attention.
+                qticks = ex[-3][i]
+                dticks = ex[-4][i]
+                n_plots = math.ceil(len(dticks) / 60.0)
+                fig = plt.figure(figsize=(15, 5 * (n_plots * 3 + 1)))
+                gs = gridspec.GridSpec(n_plots * 3 + 1, 1)
+
+                atten_data = atten_softmax[i].data.tolist()
+                max_v = atten_softmax[i].data.max()
+                min_v = atten_softmax[i].data.min()
+                dticks.extend(['' for i in range(n_plots * 60 - len(dticks))])
+                for pi in range(n_plots):
+                    # plt.subplot(n_plots, 1, i+1)
+                    fig.add_subplot(gs[pi])
+                    sns.heatmap(
+                        [j[pi * 60:(pi + 1) * 60] for j in atten_data],
+                        cmap=sns.cubehelix_palette(64),
+                        vmax=max_v,
+                        vmin=min_v,
+                        xticklabels=dticks[pi * 60:(pi + 1) * 60],
+                        yticklabels=qticks)
+                    plt.xticks(rotation=85)
+                    plt.yticks(rotation=0)
+
+                start_data = score_s[i].unsqueeze(0).tolist()
+                # visualize start position softmax weight
+                max_v = score_s[i].max()
+                min_v = score_s[i].min()
+                for si in range(n_plots):
+                    fig.add_subplot(gs[n_plots + si])
+                    sns.heatmap(
+                        [j[si * 60: (si + 1) * 60] for j in start_data],
+                        cmap=sns.cubehelix_palette(64),
+                        vmax=max_v,
+                        vmin=min_v,
+                        xticklabels=dticks[si * 60:(si + 1) * 60],
+                        yticklabels=['weight'])
+                    plt.xticks(rotation=85)
+
+                end_data = score_e[i].unsqueeze(0).tolist()
+                # visualize end position softmax weight
+                max_v = score_e[i].max()
+                min_v = score_e[i].min()
+                for ei in range(n_plots):
+                    fig.add_subplot(gs[n_plots * 2 + ei])
+                    sns.heatmap(
+                        [j[ei * 60: (ei + 1) * 60] for j in end_data],
+                        cmap=sns.cubehelix_palette(64),
+                        vmax=max_v,
+                        vmin=min_v,
+                        xticklabels=dticks[ei * 60:(ei + 1) * 60],
+                        yticklabels=['weight'])
+                    plt.xticks(rotation=85)
+
+                fig.add_subplot(gs[n_plots * 3])
+                # visualize question merge weight
+                sns.heatmap(
+                    q_merge_weights[i].unsqueeze(0).data.tolist(),
+                    cmap=sns.cubehelix_palette(64),
+                    xticklabels=qticks,
+                    yticklabels=['weight'])
+                plt.xticks(rotation=85)
+
+                gs.update(wspace=.5, hspace=0.7)
+                plt.show()
+                plt.clf()
 
         return predictions
 

@@ -77,7 +77,8 @@ class RnnDocReader(nn.Module):
 
         # Question merging
         if opt['question_merge'] not in ['avg', 'self_attn']:
-            raise NotImplementedError('question_merge = %s' % opt['question_merge'])
+            raise NotImplementedError(
+                'question_merge = %s' % opt['question_merge'])
         if opt['question_merge'] == 'self_attn':
             self.self_attn = layers.LinearSeqAttn(question_hidden_size)
 
@@ -112,7 +113,8 @@ class RnnDocReader(nn.Module):
 
         # Add attention-weighted question representation
         if self.opt['use_qemb']:
-            x2_weighted_emb = self.qemb_match(x1_emb, x2_emb, x2_mask)
+            x2_weighted_emb, atten_softmax = self.qemb_match(
+                x1_emb, x2_emb, x2_mask)
             drnn_input = torch.cat([x1_emb, x2_weighted_emb, x1_f], 2)
         else:
             drnn_input = torch.cat([x1_emb, x1_f], 2)
@@ -126,9 +128,10 @@ class RnnDocReader(nn.Module):
             q_merge_weights = layers.uniform_weights(question_hiddens, x2_mask)
         elif self.opt['question_merge'] == 'self_attn':
             q_merge_weights = self.self_attn(question_hiddens, x2_mask)
-        question_hidden = layers.weighted_avg(question_hiddens, q_merge_weights)
+        question_hidden = layers.weighted_avg(question_hiddens,
+                                              q_merge_weights)
 
         # Predict start and end positions
         start_scores = self.start_attn(doc_hiddens, question_hidden, x1_mask)
         end_scores = self.end_attn(doc_hiddens, question_hidden, x1_mask)
-        return start_scores, end_scores
+        return start_scores, end_scores, atten_softmax, q_merge_weights
