@@ -134,6 +134,7 @@ def main():
 
         if parleys == 2:
             run_eval(agent, opt, 'test')
+            world.save_agents()
 
         if opt['num_epochs'] > 0 and parleys >= max_parleys:
             print('[ num_epochs completed: {} ]'.format(opt['num_epochs']))

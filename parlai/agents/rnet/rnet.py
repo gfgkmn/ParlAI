@@ -250,10 +250,12 @@ class RnetAgent(Agent):
 
         return batch_reply
 
-    def save(self, filename):
+    def save(self, fname=None):
         """Save the parameters of the agent to a file."""
-        print("[ saving model: " + self.opt['model_file'] + " ]")
-        self.model.save(self.opt['model_file'])
+        fname = self.opt.get('model_file', None) if fname is None else fname
+        if fname:
+            print("[ saving model: " + fname + " ]")
+            self.model.save(fname)
 
     # --------------------------------------------------------------------------
     # Helper functions.
