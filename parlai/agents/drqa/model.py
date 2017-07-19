@@ -13,9 +13,6 @@ import math
 from torch.autograd import Variable
 from .utils import load_embeddings, AverageMeter
 from .rnn_reader import RnnDocReader
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import seaborn as sns
 
 logger = logging.getLogger('DrQA')
 
@@ -100,7 +97,7 @@ class DocReaderModel(object):
             target_e = Variable(ex[6])
 
         # Run forward
-        score_s, score_e = self.network(*inputs)
+        score_s, score_e, _, __ = self.network(*inputs)
 
         # Compute loss and accuracies
         loss = F.nll_loss(score_s, target_s) + F.nll_loss(score_e, target_e)
@@ -133,8 +130,12 @@ class DocReaderModel(object):
             inputs = [Variable(e, volatile=True) for e in ex[:5]]
 
         # Run forward
-        score_s, score_e, atten_softmax, q_merge_weights = self.network(
-            *inputs)
+        if self.opt['visualize_attention']:
+            score_s, score_e, atten_softmax, q_merge_weights = self.network(
+                *inputs)
+        else:
+            score_s, score_e, _, __ = self.network(
+                *inputs)
 
         # Transfer to CPU/normal tensors for numpy ops
         score_s = score_s.data.cpu()
@@ -154,6 +155,9 @@ class DocReaderModel(object):
             predictions.append(text[i][s_offset:e_offset])
 
             if self.opt['visualize_attention']:
+                import matplotlib.pyplot as plt
+                import matplotlib.gridspec as gridspec
+                import seaborn as sns
                 # visualize question-aware document attention.
                 qticks = ex[-3][i]
                 dticks = ex[-4][i]

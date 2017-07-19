@@ -218,7 +218,7 @@ def main():
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     data_logger = logging.getLogger('datalogger')
-    fh = logging.FileHandler('rnet.log')
+    fh = logging.FileHandler('drqa.log')
     fh.setLevel(logging.INFO)
     formatter = logging.Formatter(
                 '%(asctime)s - %(levelname)s       %(message)s'
