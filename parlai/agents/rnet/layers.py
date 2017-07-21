@@ -68,10 +68,14 @@ class StackedBRNN(nn.Module):
             # rnn_last_hidden torch.size (2, 174, 128)
             # 2 bidirectional, 174 batch * len_w, 128 char_rnn hidden_size
 
-        # todo deal with lstm gru and other network
-        output_hiddens = torch.cat(
-            [output_hiddens[0][0][0], output_hiddens[0][0][1]], 1)
-        # index [0][0][0]: first layer result.  fetch h0. fetch forward
+        if len(rnn_last_hidden[-1]) == 2:
+            output_hiddens = torch.cat(
+                [output_hiddens[-1][0][0], output_hiddens[-1][0][1]], 1)
+            # index fetch h0
+        else:
+            output_hiddens = torch.cat(
+                [output_hiddens[-1][0], output_hiddens[-1][1]], 1)
+                # for gru or lstm, just one return value
 
         # Concat hidden layers
         if self.concat_layers:
@@ -144,8 +148,14 @@ class StackedBRNN(nn.Module):
             outputs.append(rnn_output)
             output_hiddens.append(rnn_last_hidden)
 
-        output_hiddens = torch.cat(
-            [output_hiddens[0][0][0], output_hiddens[0][0][1]], 1)
+        if len(rnn_last_hidden[-1]) == 2:
+            output_hiddens = torch.cat(
+                [output_hiddens[-1][0][0], output_hiddens[-1][0][1]], 1)
+            # index fetch h0
+        else:
+            output_hiddens = torch.cat(
+                [output_hiddens[-1][0], output_hiddens[-1][1]], 1)
+                # for gru or lstm, just one return value
 
         # Unpack everything
         for i, o in enumerate(outputs[1:], 1):
@@ -336,7 +346,7 @@ class GatedMatchRNN(nn.Module):
         else:
             padding = False
 
-        h = Variable(torch.zeros([1, self.hidden_state_size]))
+        h = Variable(torch.rand([1, self.hidden_state_size]))
         # c = self.initial_hidden_state()
         # compute ct for match lstm cell state
 
