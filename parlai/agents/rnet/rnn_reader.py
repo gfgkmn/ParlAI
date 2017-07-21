@@ -143,6 +143,10 @@ class RnnDocReader(nn.Module):
         x2_chars_mask = document character indices [ batch * len_q * len_c]
         """
 
+        if len(x1_f.size()) == 1:
+            # x1_f size : (batch,)
+            no_manual_feature = True
+
         x1_chars_size = x1_chars.size()
         x2_chars_size = x2_chars.size()
 
@@ -198,9 +202,13 @@ class RnnDocReader(nn.Module):
         # Add attention-weighted question representation
         if self.opt['use_qemb']:
             x2_weighted_emb = self.qemb_match(x1_emb, x2_emb, x2_mask)
-            drnn_input = torch.cat([x1_emb, x2_weighted_emb, x1_f], 2)
+            # drnn_input = torch.cat([x1_emb, x2_weighted_emb, x1_f], 2)
+            drnn_input = torch.cat([x1_emb, x2_weighted_emb], 2)
         else:
-            drnn_input = torch.cat([x1_emb, x1_f], 2)
+            drnn_input = x1_emb
+
+        if not no_manual_feature:
+            drnn_input = torch.cat([drnn_input, x1_f], 2)
 
         # Encode document with RNN
         doc_hiddens = self.doc_rnn(drnn_input, x1_mask)

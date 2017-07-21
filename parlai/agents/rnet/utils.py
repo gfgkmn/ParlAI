@@ -196,12 +196,18 @@ def batchify(batch, null=0, cuda=False):
     x1 = torch.LongTensor(len(docs), max_length).fill_(null)
     # (samples, doc_lengths(time_steps))
     x1_mask = torch.ByteTensor(len(docs), max_length).fill_(1)
-    x1_f = torch.zeros(len(docs), max_length, features[0].size(1))
+    if len(features[0].size()) > 1:
+        x1_f = torch.zeros(len(docs), max_length, features[0].size(1))
+        no_manual_feature = False 
+    else:
+        x1_f = torch.zeros(len(docs))
+        no_manual_feature = True 
     # (samples, doc_lengths(time_steps), features)
     for i, d in enumerate(docs):
         x1[i, :d.size(0)].copy_(d)
         x1_mask[i, :d.size(0)].fill_(0)
-        x1_f[i, :d.size(0)].copy_(features[i])
+        if not no_manual_feature:
+            x1_f[i, :d.size(0)].copy_(features[i])
     # fill document matrix.
 
     # Batch char docuemnt
