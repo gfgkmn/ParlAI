@@ -28,7 +28,7 @@ charset = set([0, 10, 8211, 257] + list(range(32, 241))) - set(
 charset = list(charset)
 char_dict = {i: charset.index(i) for i in charset}
 char_dict[0] = len(char_dict)
-charvob_size = len(charset)
+charvob_size = len(charset) + 1
 
 
 # ------------------------------------------------------------------------------
