@@ -294,7 +294,8 @@ class GatedMatchRNN(nn.Module):
                  dropout_output=False,
                  rnn_type=nn.LSTM,
                  padding=False,
-                 is_bidirectional=False):
+                 is_bidirectional=False,
+                 gated=True):
         # according to rnet papaer, gated-match-lstm hidden size must equal to
         # input size
         super(GatedMatchRNN, self).__init__()
@@ -307,6 +308,7 @@ class GatedMatchRNN(nn.Module):
         self.W_vp = nn.Linear(input_size, input_size)
         self.V = nn.Linear(input_size, 1)
         self.W_g = nn.Linear(2 * input_size, 2 * input_size)
+        self.gated = gated
         self.rnn = rnn_type(
             2 * input_size,
             input_size,
@@ -370,11 +372,15 @@ class GatedMatchRNN(nn.Module):
         # batch * len1 * len2 --- batch * len2 * h == batch * len1 * h
 
         merge_input = torch.cat((x, ct), 2)
-        gt = F.sigmoid(
-            self.W_g(
-                merge_input.view(-1, merge_input.size(-1))).view(
-                    merge_input.size()))
-        lstm_input = torch.mul(gt, torch.cat((x, ct), 2))
+
+        if self.gated:
+            gt = F.sigmoid(
+                self.W_g(
+                    merge_input.view(-1, merge_input.size(-1))).view(
+                        merge_input.size()))
+            lstm_input = torch.mul(gt, torch.cat((x, ct), 2))
+        else:
+            lstm_input = merge_input
         # batch * len1 * 2h
         if padding:
             lengths = x_mask.data.eq(0).sum(1).squeeze()
