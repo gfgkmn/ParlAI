@@ -293,10 +293,12 @@ class GatedMatchRNN(nn.Module):
                  dropout_rate=0,
                  dropout_output=False,
                  rnn_type=nn.LSTM,
+                 padding=False,
                  is_bidirectional=False):
         # according to rnet papaer, gated-match-lstm hidden size must equal to
         # input size
         super(GatedMatchRNN, self).__init__()
+        self.padding = padding
         self.dropout_output = dropout_output
         self.dropout_rate = dropout_rate
         self.hidden_state_size = input_size
@@ -309,19 +311,29 @@ class GatedMatchRNN(nn.Module):
             2 * input_size,
             input_size,
             1,
-            bidirectional=is_bidirectional,
-            batch_first=True)
+            bidirectional=is_bidirectional)
 
-    # def forward(self, x, y, y_mask):
-    def forward(self, x, y):
+    def forward(self, x, x_mask, y, y_mask):
+        # def forward(self, x, y):
         """Input shapes:
             x = batch * len1 * h
+            x_mask = batch * len1
             y = batch * len2 * h
             y_mask = batch * len2
         Output shapes:
             matched_seq = batch * len1 * h
         """
-        # todo when to use padded sentence and add padding version
+
+        # No padding necessary.
+        if x_mask.data.sum() == 0:
+            padding = False
+        # Pad if we care or if its during eval.
+        elif self.padding or not self.training:
+            padding = True
+        # We don't care.
+        else:
+            padding = False
+
         h = Variable(torch.zeros([1, self.hidden_state_size]))
         # c = self.initial_hidden_state()
         # compute ct for match lstm cell state
@@ -333,13 +345,26 @@ class GatedMatchRNN(nn.Module):
         # batch * len2 * h
         hidden_proj = self.W_vp(h)
         x_batch = x_proj.unsqueeze(2).repeat(1, 1, y.size(1), 1)
+        x_batch_mask = 1 - x_mask.unsqueeze(2)
+
         y_batch = y_proj.unsqueeze(1).repeat(1, x.size(1), 1, 1)
+        y_batch_mask = 1 - y_mask.unsqueeze(2)
+
+        sum_mask = x_batch_mask.bmm(y_batch_mask.transpose(1, 2))
+        # batch*len1*len2, indicate with similarity item is meaningful
+
         h_batch = hidden_proj.unsqueeze(0).unsqueeze(0).repeat(
             x.size(0), x.size(1), y.size(1), 1)
         sum_batch = torch.tanh(x_batch + y_batch + h_batch)
+
         s = self.V(sum_batch.view(-1, sum_batch.size(-1))).view(
             sum_batch.size()[:-1])
         # batch * len1 * len2
+        s = torch.mul(s, sum_mask.float())
+
+        y_mask = y_mask.unsqueeze(1).expand(s.size())
+        s.data.masked_fill_(y_mask.data, -float('inf'))
+
         alpha = F.softmax(s.view(-1, s.size(-1))).view(s.size())
         ct = torch.bmm(alpha, y)
         # batch * len1 * len2 --- batch * len2 * h == batch * len1 * h
@@ -350,7 +375,32 @@ class GatedMatchRNN(nn.Module):
                 merge_input.view(-1, merge_input.size(-1))).view(
                     merge_input.size()))
         lstm_input = torch.mul(gt, torch.cat((x, ct), 2))
-        output, ouput_hidden = self.rnn(lstm_input)
+        # batch * len1 * 2h
+        if padding:
+            lengths = x_mask.data.eq(0).sum(1).squeeze()
+            _, idx_sort = torch.sort(lengths, dim=0, descending=True)
+            _, idx_unsort = torch.sort(idx_sort, dim=0)
+
+            lengths = list(lengths[idx_sort])
+            idx_sort = Variable(idx_sort)
+            idx_unsort = Variable(idx_unsort)
+
+            # Sort x
+            lstm_input = lstm_input.index_select(0, idx_sort)
+            # Transpose batch and sequence dims
+            lstm_input = lstm_input.transpose(0, 1)
+
+            # Pack it up
+            rnn_input = nn.utils.rnn.pack_padded_sequence(lstm_input, lengths)
+            output, ouput_hidden = self.rnn(rnn_input)
+            output = nn.utils.rnn.pad_packed_sequence(output)[0]
+            # output = nn.utils.rnn.pad_packed_sequence(output)
+            output = output.transpose(0, 1)
+            output = output.index_select(0, idx_unsort)
+        else:
+            lstm_input = lstm_input.transpose(0, 1)
+            output, ouput_hidden = self.rnn(lstm_input)
+            output = output.transpose(0, 1)
 
         if self.dropout_output and self.dropout_rate > 0:
             output = F.dropout(output,

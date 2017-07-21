@@ -8,7 +8,6 @@ import torch
 import unicodedata
 from collections import Counter
 import spacy
-import sys
 
 NLP = spacy.load('en')
 pos_list = [
@@ -28,6 +27,7 @@ charset = set([0, 10, 8211, 257] + list(range(32, 241))) - set(
     [127, 192, 193, 211, 221, 222, 223, 238])
 charset = list(charset)
 char_dict = {i: charset.index(i) for i in charset}
+char_dict[0] = len(char_dict)
 charvob_size = len(charset)
 
 
@@ -95,6 +95,8 @@ def vectorize(opt, ex, word_dict, feature_dict):
     # Index words
     document = torch.LongTensor([word_dict[w] for w in ex['document']])
     question = torch.LongTensor([word_dict[w] for w in ex['question']])
+    # cause there is no charater whose ord value equal 0, so use 0 represent
+    # unknow, or out of character table.
     document_chars = [
         torch.LongTensor([
             char_dict[ord(i)] if ord(i) in char_dict else char_dict[0]
@@ -127,9 +129,9 @@ def vectorize(opt, ex, word_dict, feature_dict):
     # f_{tf}
     if opt['use_tf']:
         counter = Counter([w.lower() for w in ex['document']])
-        l = len(ex['document'])
+        ll = len(ex['document'])
         for i, w in enumerate(ex['document']):
-            features[i][feature_dict['tf']] = counter[w.lower()] * 1.0 / l
+            features[i][feature_dict['tf']] = counter[w.lower()] * 1.0 / ll
     if opt['use_ner']:
         for i, w in enumerate(ex['document']):
             if spacy_doc[i].ent_type_:
