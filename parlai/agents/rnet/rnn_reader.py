@@ -12,7 +12,11 @@ from .utils import charvob_size
 class RnnDocReader(nn.Module):
     """Network for the Document Reader module of RNET."""
     RNN_TYPES = {'lstm': nn.LSTM, 'gru': nn.GRU, 'rnn': nn.RNN}
-    RNN_CELL_TYPES = {'lstm': nn.LSTMCell, 'gru': nn.GRUCell, 'rnn': nn.RNNCell}
+    RNN_CELL_TYPES = {
+        'lstm': nn.LSTMCell,
+        'gru': nn.GRUCell,
+        'rnn': nn.RNNCell
+    }
 
     def __init__(self, opt, padding_idx=0):
         super(RnnDocReader, self).__init__()
@@ -101,14 +105,16 @@ class RnnDocReader(nn.Module):
                 is_bidirectional=False,
                 )
 
-        # self.self_alignment_rnn = layers.GatedMatchRNN(
-        #         input_size=doc_input_size,
-        #         dropout_rate=opt['dropout_rnn'],
-        #         dropout_output=opt['dropout_rnn_output'],
-        #         rnn_type=self.RNN_TYPES[opt['rnn_type']],
-        #         padding=opt['rnn_padding'],
-        #         is_bidirectional=True,
-        #         )
+        self.self_alignment_rnn = layers.GatedMatchRNN(
+                input_size=doc_input_size,
+                dropout_rate=opt['dropout_rnn'],
+                dropout_output=opt['dropout_rnn_output'],
+                rnn_cell_type=self.RNN_CELL_TYPES[opt['rnn_type']],
+                padding=opt['rnn_padding'],
+                gated=False,
+                is_bidirectional=True,
+                h_weight=False
+                )
 
         question_input_size = opt['embedding_dim'] + opt['charemb_rnn_dim'] * 2
 
@@ -141,12 +147,12 @@ class RnnDocReader(nn.Module):
         # Bilinear attention for span start/end
         self.start_attn = layers.BilinearSeqAttn(
             # doc_hidden_size,
-            doc_input_size,
+            doc_input_size * 2,
             question_hidden_size,
         )
         self.end_attn = layers.BilinearSeqAttn(
             # doc_hidden_size,
-            doc_input_size,
+            doc_input_size * 2,
             question_hidden_size,
         )
 
@@ -235,8 +241,8 @@ class RnnDocReader(nn.Module):
         # doc_hiddens = self.doc_rnn(drnn_input, x1_mask)
         doc_hiddens = self.gated_match_rnn(drnn_input, x1_mask, x2_emb,
                                            x2_mask)
-        # doc_hiddens = self.self_alignment_rnn(doc_hiddens, x1_mask,
-        #                                       doc_hiddens, x1_mask)
+        doc_hiddens = self.self_alignment_rnn(doc_hiddens, x1_mask,
+                                              doc_hiddens, x1_mask)
         # print(doc_hiddens.size())
 
         # Encode question with RNN + merge hiddens

@@ -305,7 +305,8 @@ class GatedMatchRNN(nn.Module):
                  rnn_cell_type=nn.LSTMCell,
                  padding=False,
                  is_bidirectional=False,
-                 gated=True):
+                 gated=True,
+                 h_weight=True):
         # according to rnet papaer, gated-match-lstm hidden size must equal to
         # input size
         super(GatedMatchRNN, self).__init__()
@@ -315,7 +316,9 @@ class GatedMatchRNN(nn.Module):
         self.hidden_state_size = input_size
         self.W_q = nn.Linear(input_size, input_size)
         self.W_up = nn.Linear(input_size, input_size)
-        self.W_vp = nn.Linear(input_size, input_size)
+        self.h_weight = h_weight
+        if h_weight:
+            self.W_vp = nn.Linear(input_size, input_size)
         self.V = nn.Linear(input_size, 1)
         self.W_g = nn.Linear(2 * input_size, 2 * input_size)
         self.gated = gated
@@ -430,6 +433,7 @@ class GatedMatchRNN(nn.Module):
             x_backward_in = maskd_reverse(x, x_mask)
             x_backward = self.uni_forward(x_backward_in, x_mask, y, y_mask)
             x_backward = maskd_reverse(x_backward, x_mask)
+            # x_backward = self.uni_forward(x, x_mask, y, y_mask)
             return torch.cat((x_forward, x_backward), 2)
         else:
             return self.uni_forward(x, x_mask, y, y_mask)
@@ -460,9 +464,12 @@ class GatedMatchRNN(nn.Module):
             # batch * len2 * h
             x_proj = self.W_up(x[:, t, :]).unsqueeze(1).expand(y_proj.size())
             # batch * h -> batch * len2 * h
-            hidden_proj = self.W_vp(h).unsqueeze(1).expand(y_proj.size())
-            # 1 * h
-            sum_batch = torch.tanh(x_proj + y_proj + hidden_proj)
+            if self.h_weight:
+                hidden_proj = self.W_vp(h).unsqueeze(1).expand(y_proj.size())
+                # 1 * h
+                sum_batch = torch.tanh(x_proj + y_proj + hidden_proj)
+            else:
+                sum_batch = torch.tanh(x_proj + y_proj)
             s = self.V(sum_batch.view(-1, sum_batch.size(-1))).squeeze()
             s = s.view(sum_batch.size()[:-1])
             # batch * len2
@@ -527,10 +534,14 @@ def maskd_reverse(x, x_mask):
     assert mask item is 1 if x item is meaningless
     """
     max_len = x.size(1)
+    return_ten = Variable(torch.zeros(x.size()))
+    if x.data.is_cuda:
+        return_ten = return_ten.cuda()
     for i in range(x.size(0)):
-        length = x_mask[i].eq(0).sum()
-        idx = torch.LongTensor(
-            list(range(length - 1, -1, -1)) + list(range(length, max_len)))
-        temp = x[i].index_select(0, idx)
-        x[i] = temp
+        length = x_mask[i].data.eq(0).sum()
+        idx = Variable(torch.LongTensor(
+            list(range(length - 1, -1, -1)) + list(range(length, max_len))))
+        if x.data.is_cuda:
+            idx = idx.cuda()
+        return_ten[i] = x[i].index_select(0, idx)
     return x
