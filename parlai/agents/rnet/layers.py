@@ -323,7 +323,7 @@ class GatedMatchRNN(nn.Module):
         self.rnn_cell = rnn_cell_type(
             2 * input_size,
             input_size)
-        # todo implement bidirectional rnn
+        self.is_bidirectional = is_bidirectional
 
     # def forward_back(self, x, x_mask, y, y_mask):
     #     # def forward(self, x, y):
@@ -425,6 +425,16 @@ class GatedMatchRNN(nn.Module):
     #     return output
 
     def forward(self, x, x_mask, y, y_mask):
+        if self.is_bidirectional:
+            x_forward = self.uni_forward(x, x_mask, y, y_mask)
+            x_backward_in = maskd_reverse(x, x_mask)
+            x_backward = self.uni_forward(x_backward_in, x_mask, y, y_mask)
+            x_backward = maskd_reverse(x_backward, x_mask)
+            return torch.cat((x_forward, x_backward), 2)
+        else:
+            return self.uni_forward(x, x_mask, y, y_mask)
+
+    def uni_forward(self, x, x_mask, y, y_mask):
         """Input shapes:
             x = batch * len1 * h
             x_mask = batch * len1
@@ -505,3 +515,19 @@ def weighted_avg(x, weights):
     weights = batch * len
     """
     return weights.unsqueeze(1).bmm(x).squeeze(1)
+
+
+def maskd_reverse(x, x_mask):
+    """
+    x = batch * len * d
+    x_mask = batch * len
+    assert mask item is 1 if x item is meaningless
+    """
+    max_len = x.size(1)
+    for i in range(x.size(0)):
+        length = x_mask[i].eq(0).sum()
+        idx = torch.LongTensor(
+            list(range(length - 1, -1, -1)) + list(range(length, max_len)))
+        temp = x[i].index_select(0, idx)
+        x[i] = temp
+    return x

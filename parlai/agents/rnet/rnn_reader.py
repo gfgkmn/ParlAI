@@ -41,7 +41,6 @@ class RnnDocReader(nn.Module):
             self.register_buffer('fixed_embedding', torch.Tensor(buffer_size))
 
         # RNN docuemnt character encoder
-        # todo may padding is needed, it's different with doc_rnn
         self.doc_char_rnn = layers.StackedBRNN(
             input_size=opt['char_embedding_dim'],
             hidden_size=opt['charemb_rnn_dim'],
@@ -173,8 +172,6 @@ class RnnDocReader(nn.Module):
         x1_chars_size = x1_chars.size()
         x2_chars_size = x2_chars.size()
 
-        # todo current batch must == 1, otherwise the long sequence last word
-        # will be all zero.
         x1_chars_emb = self.char_embedding(
             x1_chars.view(-1, x1_chars.size(-1)))
         x2_chars_emb = self.char_embedding(
