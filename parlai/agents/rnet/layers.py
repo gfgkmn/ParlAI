@@ -449,6 +449,9 @@ class GatedMatchRNN(nn.Module):
         if self.rnn_cell_type == nn.LSTMCell:
             c = Variable(torch.rand([batch, self.hidden_state_size]))
         # compute ct for match lstm cell state
+        if x.data.is_cuda:
+            h = h.cuda()
+            c = c.cuda()
 
         time_steps = x.size(1)
         hiddens = []

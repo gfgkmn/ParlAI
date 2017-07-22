@@ -12,6 +12,7 @@ from .utils import charvob_size
 class RnnDocReader(nn.Module):
     """Network for the Document Reader module of RNET."""
     RNN_TYPES = {'lstm': nn.LSTM, 'gru': nn.GRU, 'rnn': nn.RNN}
+    RNN_CELL_TYPES = {'lstm': nn.LSTMCell, 'gru': nn.GRUCell, 'rnn': nn.RNNCell}
 
     def __init__(self, opt, padding_idx=0):
         super(RnnDocReader, self).__init__()
@@ -80,25 +81,25 @@ class RnnDocReader(nn.Module):
 
         # RNN document encoder
         # disabled use gated_match_lstm and self-alignment layer to subsitude
-        self.doc_rnn = layers.StackedBRNN(
-            input_size=doc_input_size,
-            hidden_size=opt['hidden_size'],
-            num_layers=opt['doc_layers'],
-            dropout_rate=opt['dropout_rnn'],
-            dropout_output=opt['dropout_rnn_output'],
-            concat_layers=opt['concat_rnn_layers'],
-            rnn_type=self.RNN_TYPES[opt['rnn_type']],
-            padding=opt['rnn_padding'],
-        )
+        # self.doc_rnn = layers.StackedBRNN(
+        #     input_size=doc_input_size,
+        #     hidden_size=opt['hidden_size'],
+        #     num_layers=opt['doc_layers'],
+        #     dropout_rate=opt['dropout_rnn'],
+        #     dropout_output=opt['dropout_rnn_output'],
+        #     concat_layers=opt['concat_rnn_layers'],
+        #     rnn_type=self.RNN_TYPES[opt['rnn_type']],
+        #     padding=opt['rnn_padding'],
+        # )
 
-        # self.gated_match_rnn = layers.GatedMatchRNN(
-        #         input_size=doc_input_size,
-        #         dropout_rate=opt['dropout_rnn'],
-        #         dropout_output=opt['dropout_rnn_output'],
-        #         rnn_type=self.RNN_TYPES[opt['rnn_type']],
-        #         padding=opt['rnn_padding'],
-        #         is_bidirectional=False,
-        #         )
+        self.gated_match_rnn = layers.GatedMatchRNN(
+                input_size=doc_input_size,
+                dropout_rate=opt['dropout_rnn'],
+                dropout_output=opt['dropout_rnn_output'],
+                rnn_cell_type=self.RNN_CELL_TYPES[opt['rnn_type']],
+                padding=opt['rnn_padding'],
+                is_bidirectional=False,
+                )
 
         # self.self_alignment_rnn = layers.GatedMatchRNN(
         #         input_size=doc_input_size,
@@ -139,13 +140,13 @@ class RnnDocReader(nn.Module):
 
         # Bilinear attention for span start/end
         self.start_attn = layers.BilinearSeqAttn(
-            doc_hidden_size,
-            # doc_input_size,
+            # doc_hidden_size,
+            doc_input_size,
             question_hidden_size,
         )
         self.end_attn = layers.BilinearSeqAttn(
-            doc_hidden_size,
-            # doc_input_size,
+            # doc_hidden_size,
+            doc_input_size,
             question_hidden_size,
         )
 
@@ -231,9 +232,9 @@ class RnnDocReader(nn.Module):
             drnn_input = torch.cat([drnn_input, x1_f], 2)
 
         # Encode document with RNN
-        doc_hiddens = self.doc_rnn(drnn_input, x1_mask)
-        # doc_hiddens = self.gated_match_rnn(drnn_input, x1_mask, x2_emb,
-        #                                    x2_mask)
+        # doc_hiddens = self.doc_rnn(drnn_input, x1_mask)
+        doc_hiddens = self.gated_match_rnn(drnn_input, x1_mask, x2_emb,
+                                           x2_mask)
         # doc_hiddens = self.self_alignment_rnn(doc_hiddens, x1_mask,
         #                                       doc_hiddens, x1_mask)
         # print(doc_hiddens.size())
