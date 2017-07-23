@@ -2,7 +2,8 @@ from torch import nn
 from torch.autograd import Variable
 import torch
 import torch.nn.functional as F
-from layers import GatedMatchRNN
+# from layers import GatedMatchRNN
+from layers import PointerNetwork
 
 batch = 3
 document = 3
@@ -51,6 +52,7 @@ y_emb = emb(y)
 # we must mask this vector to get the right matrix.
 
 
-m = GatedMatchRNN(4, padding=True)
+# m = GatedMatchRNN(4, padding=True)
+m = PointerNetwork(4)
 output = m(x_emb, x_mask, y_emb, y_mask)
 print(output)

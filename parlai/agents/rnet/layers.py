@@ -455,7 +455,8 @@ class GatedMatchRNN(nn.Module):
         # compute ct for match lstm cell state
         if x.data.is_cuda:
             h = h.cuda()
-            c = c.cuda()
+            if self.rnn_cell_type == nn.LSTMCell:
+                c = c.cuda()
 
         time_steps = x.size(1)
         hiddens = []
@@ -503,7 +504,119 @@ class GatedMatchRNN(nn.Module):
             hiddens.append(h)
 
         output = torch.stack(hiddens, 1)
+
+        if self.dropout_output and self.dropout_rate > 0:
+            output = F.dropout(
+                output, p=self.dropout_rate, training=self.training)
+
         return output
+
+
+class PointerNetwork(nn.Module):
+    """
+    pointer network, Given sequence X and Y return start positon and end
+    position
+    * s[t][j] = V_t * tanh(W_hp * Hp[j] + W_ha  ha[t-1])
+    * a[t][i] = exp(s[t][i]) / sum(exp(s[t]))
+    * p[t] = softmax(a[t])
+    *
+    * return argmax(p)
+    *
+
+    * ha[t] = rnn(ha[t-1], weighted_avg(Hp, a[t]))
+    """
+    def __init__(self,
+                 input_size,
+                 # dropout_rate=0,
+                 # dropout_output=False,
+                 rnn_cell_type=nn.LSTMCell,
+                 # padding=False,
+                 # is_bidirectional=False,
+                 # gated=True,
+                 question_init=True):
+        # according to rnet papaer, gated-match-lstm hidden size must equal to
+        # input size
+        super(PointerNetwork, self).__init__()
+        # self.dropout_output = dropout_output
+        # self.dropout_rate = dropout_rate
+        self.hidden_state_size = input_size
+        self.W_hp = nn.Linear(input_size, input_size)
+        self.W_ha = nn.Linear(input_size, input_size)
+        self.W_uq = nn.Linear(input_size, input_size)
+        self.W_vq = nn.Linear(input_size, input_size)
+        self.V = nn.Linear(input_size, 1)
+        self.question_init = question_init
+        self.rnn_cell_type = rnn_cell_type
+        self.rnn_cell = rnn_cell_type(
+            input_size,
+            input_size)
+
+    def forward(self, x, x_mask, y, y_mask):
+        """Input shapes:
+            x = batch * len1 * h
+            x_mask = batch * len1
+            y = batch * len2 * h
+            y_mask = batch * len2
+        Output shapes:
+            start_scores = alphas
+            end_scores = betas
+        """
+        batch = x.size(0)
+        VrQ = Variable(torch.randn(1, self.hidden_state_size))
+        if x.data.is_cuda:
+            VrQ = VrQ.cuda()
+
+        if self.question_init:
+            question_transform = self.W_uq(y.view(-1, y.size(-1)))
+            VrQ_expand = VrQ.repeat(batch, y.size(1), 1)
+            parameter_transform = self.W_vq(
+                VrQ_expand.view(-1, y.size(-1)))
+            s = self.V(torch.tanh(question_transform +
+                                  parameter_transform)).view(y.size()[:-1])
+            # batch * len2
+            # s.masked_fill_(y_mask.data, -float('inf'))
+            s.masked_fill_(y_mask, -float('inf'))
+            # batch * len2 * h
+            alpha = F.softmax(s)
+            rq = weighted_avg(y, alpha)
+            h = rq
+        else:
+            h = Variable(torch.rand([batch, self.hidden_state_size]))
+
+        if self.rnn_cell_type == nn.LSTMCell:
+            c = Variable(torch.rand([batch, self.hidden_state_size]))
+        # compute ct for match lstm cell state
+        if x.data.is_cuda:
+            h = h.cuda()
+            if self.rnn_cell_type == nn.LSTMCell:
+                c = c.cuda()
+
+        scores = []
+        for t in range(2):
+            x_proj = self.W_hp(x.view(-1, x.size(-1)))
+            # batch * len1, h
+            hidden = h.unsqueeze(1).repeat(1, x.size(1), 1)
+            hidden_proj = self.W_ha(hidden.view(-1, h.size(-1)))
+            sum_batch = torch.tanh(x_proj + hidden_proj)
+            s = self.V(sum_batch).view(x.size()[:-1])
+            # batch * len1
+            s.data.masked_fill_(x_mask.data, -float('inf'))
+            score = F.softmax(s)
+            # batch * len2
+            scores.append(score)
+            ct = weighted_avg(x, score)
+            # batch * h
+
+            # merge_input = torch.cat((x[:, t, :], ct), 1)
+            merge_input = ct
+            # batch * 2h
+
+            if self.rnn_cell_type == nn.LSTMCell:
+                h, c = self.rnn_cell(merge_input, (h, c))
+            else:
+                h = self.rnn_cell(merge_input, h)
+
+        return scores[0], scores[1]
 
     # ------------------------------------------------------------------------------
     # Functional
