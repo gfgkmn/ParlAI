@@ -527,23 +527,16 @@ class PointerNetwork(nn.Module):
     """
     def __init__(self,
                  input_size,
-                 # dropout_rate=0,
-                 # dropout_output=False,
+                 question_size,
                  rnn_cell_type=nn.LSTMCell,
-                 # padding=False,
-                 # is_bidirectional=False,
-                 # gated=True,
                  question_init=True):
-        # according to rnet papaer, gated-match-lstm hidden size must equal to
-        # input size
         super(PointerNetwork, self).__init__()
-        # self.dropout_output = dropout_output
-        # self.dropout_rate = dropout_rate
         self.hidden_state_size = input_size
+        self.question_hidden_size = question_size
         self.W_hp = nn.Linear(input_size, input_size)
         self.W_ha = nn.Linear(input_size, input_size)
-        self.W_uq = nn.Linear(input_size, input_size)
-        self.W_vq = nn.Linear(input_size, input_size)
+        self.W_uq = nn.Linear(question_size, input_size)
+        self.W_vq = nn.Linear(question_size, input_size)
         self.V = nn.Linear(input_size, 1)
         self.question_init = question_init
         self.rnn_cell_type = rnn_cell_type
@@ -562,7 +555,7 @@ class PointerNetwork(nn.Module):
             end_scores = betas
         """
         batch = x.size(0)
-        VrQ = Variable(torch.randn(1, self.hidden_state_size))
+        VrQ = Variable(torch.randn(1, self.question_hidden_size))
         if x.data.is_cuda:
             VrQ = VrQ.cuda()
 

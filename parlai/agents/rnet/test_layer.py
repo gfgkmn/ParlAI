@@ -53,6 +53,6 @@ y_emb = emb(y)
 
 
 # m = GatedMatchRNN(4, padding=True)
-m = PointerNetwork(4)
+m = PointerNetwork(4, 4)
 output = m(x_emb, x_mask, y_emb, y_mask)
 print(output)
