@@ -68,7 +68,7 @@ class StackedBRNN(nn.Module):
             # rnn_last_hidden torch.size (2, 174, 128)
             # 2 bidirectional, 174 batch * len_w, 128 char_rnn hidden_size
 
-        if len(rnn_last_hidden[-1]) == 2:
+        if isinstance(self.rnns[i], nn.LSTM):
             output_hiddens = torch.cat(
                 [output_hiddens[-1][0][0], output_hiddens[-1][0][1]], 1)
             # index fetch h0
@@ -148,7 +148,7 @@ class StackedBRNN(nn.Module):
             outputs.append(rnn_output)
             output_hiddens.append(rnn_last_hidden)
 
-        if len(rnn_last_hidden[-1]) == 2:
+        if isinstance(self.rnns[i], nn.LSTM):
             output_hiddens = torch.cat(
                 [output_hiddens[-1][0][0], output_hiddens[-1][0][1]], 1)
             # index fetch h0

@@ -72,10 +72,14 @@ def add_cmdline_args(parser):
                         help='Dropout rate for char RNN states')
     agent.add_argument('--dropout_char_rnn_output', type='bool', default=False,
                         help='Whether to dropout the char RNN output')
-    agent.add_argument('--optimizer', type=str, default='adamax',
-                        help='Optimizer: sgd or adamax (default)')
+    agent.add_argument('--optimizer', type=str, default='adadelta',
+                        help='Optimizer: sgd or adamax or adadelta (default)')
     agent.add_argument('--learning_rate', '-lr', type=float, default=0.1,
                         help='Learning rate for SGD (default 0.1)')
+    agent.add_argument('--rho', type=float, default=0.95,
+                        help='rho for Adadelta (default 0.95)')
+    agent.add_argument('--eps', type=float, default=1e-6,
+                        help='episilon for Adadelta (default 1e-6)')
     agent.add_argument('--grad_clipping', type=float, default=10,
                         help='Gradient clipping (default 10.0)')
     agent.add_argument('--weight_decay', type=float, default=0,

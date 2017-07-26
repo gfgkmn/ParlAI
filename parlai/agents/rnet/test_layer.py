@@ -3,7 +3,7 @@ from torch.autograd import Variable
 import torch
 import torch.nn.functional as F
 # from layers import GatedMatchRNN
-from layers import PointerNetwork
+from layers import PointerNetwork, StackedBRNN
 
 batch = 3
 document = 3
@@ -53,6 +53,8 @@ y_emb = emb(y)
 
 
 # m = GatedMatchRNN(4, padding=True)
-m = PointerNetwork(4, 4)
-output = m(x_emb, x_mask, y_emb, y_mask)
+# m = PointerNetwork(4, 4)
+# output = m(x_emb, x_mask, y_emb, y_mask)
+m = StackedBRNN(4, 8, 3, 0.2, False, nn.GRU, True, True)
+output = m(x_emb, x_mask)
 print(output)
