@@ -535,8 +535,9 @@ class PointerNetwork(nn.Module):
         self.question_hidden_size = question_size
         self.W_hp = nn.Linear(input_size, input_size)
         self.W_ha = nn.Linear(input_size, input_size)
-        self.W_uq = nn.Linear(question_size, input_size)
-        self.W_vq = nn.Linear(question_size, input_size)
+        self.W_y_tranform = nn.Linear(question_size, input_size)
+        self.W_uq = nn.Linear(input_size, input_size)
+        self.W_vq = nn.Linear(input_size, input_size)
         self.V = nn.Linear(input_size, 1)
         self.question_init = question_init
         self.rnn_cell_type = rnn_cell_type
@@ -555,23 +556,25 @@ class PointerNetwork(nn.Module):
             end_scores = betas
         """
         batch = x.size(0)
-        VrQ = Variable(torch.randn(1, self.question_hidden_size))
+        VrQ = Variable(torch.randn(1, self.hidden_state_size))
         if x.data.is_cuda:
             VrQ = VrQ.cuda()
 
         if self.question_init:
-            question_transform = self.W_uq(y.view(-1, y.size(-1)))
-            VrQ_expand = VrQ.repeat(batch, y.size(1), 1)
+            y_proj = self.W_y_tranform(y.view(-1, y.size(-1))).view(
+                y.size()[:-1] + (self.hidden_state_size, ))
+            question_transform = self.W_uq(y_proj.view(-1, y_proj.size(-1)))
+            VrQ_expand = VrQ.repeat(batch, y_proj.size(1), 1)
             parameter_transform = self.W_vq(
-                VrQ_expand.view(-1, y.size(-1)))
-            s = self.V(torch.tanh(question_transform +
-                                  parameter_transform)).view(y.size()[:-1])
+                VrQ_expand.view(-1, y_proj.size(-1)))
+            s = self.V(torch.tanh(question_transform + parameter_transform)
+                       ).view(y_proj.size()[:-1])
             # batch * len2
             # s.masked_fill_(y_mask.data, -float('inf'))
             s.masked_fill_(y_mask, -float('inf'))
             # batch * len2 * h
             alpha = F.softmax(s)
-            rq = weighted_avg(y, alpha)
+            rq = weighted_avg(y_proj, alpha)
             h = rq
         else:
             h = Variable(torch.rand([batch, self.hidden_state_size]))
@@ -594,10 +597,14 @@ class PointerNetwork(nn.Module):
             s = self.V(sum_batch).view(x.size()[:-1])
             # batch * len1
             s.data.masked_fill_(x_mask.data, -float('inf'))
-            score = F.softmax(s)
+            alpha = F.softmax(s)
             # batch * len2
-            scores.append(score)
-            ct = weighted_avg(x, score)
+            score = F.log_softmax(s)
+            if self.training:
+                scores.append(score)
+            else:
+                scores.append(alpha)
+            ct = weighted_avg(x, alpha)
             # batch * h
 
             # merge_input = torch.cat((x[:, t, :], ct), 1)

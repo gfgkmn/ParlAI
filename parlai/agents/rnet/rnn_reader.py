@@ -85,36 +85,16 @@ class RnnDocReader(nn.Module):
 
         # RNN document encoder
         # disabled use gated_match_lstm and self-alignment layer to subsitude
-        # self.doc_rnn = layers.StackedBRNN(
-        #     input_size=doc_input_size,
-        #     hidden_size=opt['hidden_size'],
-        #     num_layers=opt['doc_layers'],
-        #     dropout_rate=opt['dropout_rnn'],
-        #     dropout_output=opt['dropout_rnn_output'],
-        #     concat_layers=opt['concat_rnn_layers'],
-        #     rnn_type=self.RNN_TYPES[opt['rnn_type']],
-        #     padding=opt['rnn_padding'],
-        # )
-
-        self.gated_match_rnn = layers.GatedMatchRNN(
-                input_size=doc_input_size,
-                dropout_rate=opt['dropout_rnn'],
-                dropout_output=opt['dropout_rnn_output'],
-                rnn_cell_type=self.RNN_CELL_TYPES[opt['rnn_type']],
-                padding=opt['rnn_padding'],
-                is_bidirectional=False,
-                )
-
-        self.self_alignment_rnn = layers.GatedMatchRNN(
-                input_size=doc_input_size,
-                dropout_rate=opt['dropout_rnn'],
-                dropout_output=opt['dropout_rnn_output'],
-                rnn_cell_type=self.RNN_CELL_TYPES[opt['rnn_type']],
-                padding=opt['rnn_padding'],
-                gated=False,
-                is_bidirectional=True,
-                h_weight=False
-                )
+        self.doc_rnn = layers.StackedBRNN(
+            input_size=doc_input_size,
+            hidden_size=opt['hidden_size'],
+            num_layers=opt['doc_layers'],
+            dropout_rate=opt['dropout_rnn'],
+            dropout_output=opt['dropout_rnn_output'],
+            concat_layers=opt['concat_rnn_layers'],
+            rnn_type=self.RNN_TYPES[opt['rnn_type']],
+            padding=opt['rnn_padding'],
+        )
 
         question_input_size = opt['embedding_dim'] + opt['charemb_rnn_dim'] * 2
 
@@ -130,31 +110,58 @@ class RnnDocReader(nn.Module):
             padding=opt['rnn_padding'],
         )
 
-        # Output sizes of rnn encoders
-        doc_hidden_size = 2 * opt['hidden_size']
-        question_hidden_size = 2 * opt['hidden_size']
-        if opt['concat_rnn_layers']:
-            doc_hidden_size *= opt['doc_layers']
-            question_hidden_size *= opt['question_layers']
+        self.gated_match_rnn = layers.GatedMatchRNN(
+                input_size=opt['hidden_size'] * 2,
+                # assert doc_rnn and question_rnn's hidden_state not concat
+                dropout_rate=opt['dropout_rnn'],
+                dropout_output=opt['dropout_rnn_output'],
+                rnn_cell_type=self.RNN_CELL_TYPES[opt['rnn_type']],
+                padding=opt['rnn_padding'],
+                is_bidirectional=True,
+                )
 
-        # Question merging
-        if opt['question_merge'] not in ['avg', 'self_attn']:
-            raise NotImplementedError(
-                'question_merge = %s' % opt['question_merge'])
-        if opt['question_merge'] == 'self_attn':
-            self.self_attn = layers.LinearSeqAttn(question_hidden_size)
+        self.self_alignment_rnn = layers.GatedMatchRNN(
+                input_size=opt['hidden_size'] * 4,
+                # assert doc_rnn and question_rnn's hidden_state not concat
+                dropout_rate=opt['dropout_rnn'],
+                dropout_output=opt['dropout_rnn_output'],
+                rnn_cell_type=self.RNN_CELL_TYPES[opt['rnn_type']],
+                padding=opt['rnn_padding'],
+                gated=False,
+                is_bidirectional=False,
+                h_weight=False
+                )
 
-        # Bilinear attention for span start/end
-        self.start_attn = layers.BilinearSeqAttn(
-            # doc_hidden_size,
-            doc_input_size * 2,
-            question_hidden_size,
-        )
-        self.end_attn = layers.BilinearSeqAttn(
-            # doc_hidden_size,
-            doc_input_size * 2,
-            question_hidden_size,
-        )
+        self.pointer_network = layers.PointerNetwork(
+                input_size=opt['hidden_size'] * 4,
+                question_size=opt['hidden_size'] * 2,
+                rnn_cell_type=self.RNN_CELL_TYPES[opt['rnn_type']],
+                )
+        # # Output sizes of rnn encoders
+        # doc_hidden_size = 2 * opt['hidden_size']
+        # question_hidden_size = 2 * opt['hidden_size']
+        # if opt['concat_rnn_layers']:
+        #     doc_hidden_size *= opt['doc_layers']
+        #     question_hidden_size *= opt['question_layers']
+
+        # # Question merging
+        # if opt['question_merge'] not in ['avg', 'self_attn']:
+        #     raise NotImplementedError(
+        #         'question_merge = %s' % opt['question_merge'])
+        # if opt['question_merge'] == 'self_attn':
+        #     self.self_attn = layers.LinearSeqAttn(question_hidden_size)
+
+        # # Bilinear attention for span start/end
+        # self.start_attn = layers.BilinearSeqAttn(
+        #     # doc_hidden_size,
+        #     doc_input_size * 2,
+        #     question_hidden_size,
+        # )
+        # self.end_attn = layers.BilinearSeqAttn(
+        #     # doc_hidden_size,
+        #     doc_input_size * 2,
+        #     question_hidden_size,
+        # )
 
     def forward(self, x1, x1_f, x1_mask, x1_chars, x1_chars_mask, x2, x2_mask,
                 x2_chars, x2_chars_mask):
@@ -238,23 +245,28 @@ class RnnDocReader(nn.Module):
             drnn_input = torch.cat([drnn_input, x1_f], 2)
 
         # Encode document with RNN
-        # doc_hiddens = self.doc_rnn(drnn_input, x1_mask)
-        doc_hiddens = self.gated_match_rnn(drnn_input, x1_mask, x2_emb,
-                                           x2_mask)
+        doc_hiddens = self.doc_rnn(drnn_input, x1_mask)
+        question_hiddens = self.question_rnn(x2_emb, x2_mask)
+
+        doc_hiddens = self.gated_match_rnn(doc_hiddens, x1_mask,
+                                           question_hiddens, x2_mask)
         doc_hiddens = self.self_alignment_rnn(doc_hiddens, x1_mask,
                                               doc_hiddens, x1_mask)
         # print(doc_hiddens.size())
+        scores = self.pointer_network(doc_hiddens, x1_mask, question_hiddens,
+                                      x2_mask)
+        start_scores, end_scores = scores
 
         # Encode question with RNN + merge hiddens
-        question_hiddens = self.question_rnn(x2_emb, x2_mask)
-        if self.opt['question_merge'] == 'avg':
-            q_merge_weights = layers.uniform_weights(question_hiddens, x2_mask)
-        elif self.opt['question_merge'] == 'self_attn':
-            q_merge_weights = self.self_attn(question_hiddens, x2_mask)
-        question_hidden = layers.weighted_avg(question_hiddens,
-                                              q_merge_weights)
+        # if self.opt['question_merge'] == 'avg':
+        #     q_merge_weights = layers.uniform_weights(
+        #             question_hiddens, x2_mask)
+        # elif self.opt['question_merge'] == 'self_attn':
+        #     q_merge_weights = self.self_attn(question_hiddens, x2_mask)
+        # question_hidden = layers.weighted_avg(question_hiddens,
+        #                                       q_merge_weights)
 
-        # Predict start and end positions
-        start_scores = self.start_attn(doc_hiddens, question_hidden, x1_mask)
-        end_scores = self.end_attn(doc_hiddens, question_hidden, x1_mask)
+        # # Predict start and end positions
+        # start_scores = self.start_attn(doc_hiddens, question_hidden, x1_mask)
+        # end_scores = self.end_attn(doc_hiddens, question_hidden, x1_mask)
         return start_scores, end_scores
