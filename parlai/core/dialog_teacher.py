@@ -44,7 +44,7 @@ class DialogTeacher(Teacher):
         self.startTime = time.time()
 
         # first initialize any shared objects
-        self.random = self.datatype == 'train'
+        self.random = (self.datatype == 'train') or opt['random_display']
         if shared and shared.get('data'):
             self.data = DialogData(opt, None, cands=self.label_candidates(),
                                     shared=shared['data'].share())

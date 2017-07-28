@@ -126,6 +126,9 @@ class ParlaiParser(argparse.ArgumentParser):
             help='path for non-data dependencies to store any needed files.' +
                  'defaults to {parlai_dir}/downloads')
         parlai.add_argument(
+            '--random_display', default=False, type=bool,
+            help='when display data or display model, whether to random display')
+        parlai.add_argument(
             '-dt', '--datatype', default='train',
             choices=['train', 'train:ordered', 'valid', 'test'],
             help='choose from: train, train:ordered, valid, test. ' +

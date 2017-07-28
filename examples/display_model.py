@@ -17,6 +17,34 @@ from parlai.core.agents import create_agent
 from parlai.core.worlds import create_task
 
 import random
+import json
+import requests
+
+translate_token = ""
+
+
+def translate(astr):
+    origin_data = {
+        # "source": str(sys.argv[1]),
+        "source": astr,
+        "trans_type": "en2zh",
+        "request_id": "a11111",
+        "replaced": True,
+        "cached": True
+    }
+    json_data = json.dumps(origin_data)
+
+    return_data = requests.post(
+        'http://api.interpreter.caiyunai.com/v1/translator',
+        data=json_data,
+        headers={
+            "Content-type": "application/json",
+            "X-Authorization": "token " % translate_token,
+        })
+
+    # print json.loads(return_data.content)['target']
+    return json.loads(return_data.content)['target']
+
 
 def main():
     random.seed(42)
@@ -34,10 +62,20 @@ def main():
     with world:
         for k in range(int(opt['num_examples'])):
             world.parley()
-            print(world.display() + "\n~~")
+            msgs = world.display()
+            document, question, answer, _ = msgs.split('\n')
+            print(document + '\n')
+            print(translate(document) + '\n')
+            print(question + '\n')
+            print(translate(question) + '\n')
+            print(answer + '\n')
+            print(translate(answer) + '\n')
+            # print(world.display() + "\n~~")
+            input("Input any key to continue:")
             if world.epoch_done():
                 print("EPOCH DONE")
                 break
+
 
 if __name__ == '__main__':
     main()
