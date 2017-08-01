@@ -184,6 +184,15 @@ class StackedBRNN(nn.Module):
                 output = F.dropout(output,
                                    p=self.dropout_rate,
                                    training=self.training)
+            if x_mask.size(1) != output.size(1):
+                # cause when use multi-gpu pytorch split a batch into multiple batch 
+                # into different core, but max_len is calculate through a whole batch
+                # so maybe in a gpu core, actural max length is much shorter than max_len
+                # you should concatenate zeros after question_hiddens
+                for_pad = output.unsqueeze(1)
+                # batch * max_len * feature
+                pad_hiddens = F.pad(for_pad, (0, 0, 0, x_mask.size(1) - output.size(1))).squeeze()
+                output = pad_hiddens
             return output
 
 
