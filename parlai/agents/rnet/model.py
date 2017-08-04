@@ -31,8 +31,7 @@ class DocReaderModel(object):
 
         # Building network.
         self.network = RnnDocReader(opt)
-        if opt['multi_gpu']:
-            self.gpu_device_id = [int(i) for i in opt['multi_gpu']]
+        self.gpu_device_id = [int(i) for i in opt['multi_gpu']]
         if state_dict:
             new_state = set(self.network.state_dict().keys())
             for k in list(state_dict['network'].keys()):
@@ -105,8 +104,11 @@ class DocReaderModel(object):
 
         # Run forward
         # score_s, score_e = self.network(*inputs)
-        net = torch.nn.DataParallel(self.network, device_ids=self.gpu_device_id)
-        score_s, score_e = net(*inputs)
+        if len(self.gpu_device_id) > 1:
+            net = torch.nn.DataParallel(self.network, device_ids=self.gpu_device_id)
+            score_s, score_e = net(*inputs)
+        else:
+            score_s, score_e = self.network(*inputs)
         
 
         # Compute loss and accuracies
@@ -141,8 +143,11 @@ class DocReaderModel(object):
 
         # Run forward
         # score_s, score_e = self.network(*inputs)
-        net = torch.nn.DataParallel(self.network, device_ids=self.gpu_device_id)
-        score_s, score_e = net(*inputs)
+        if len(self.gpu_device_id) > 1:
+            net = torch.nn.DataParallel(self.network, device_ids=self.gpu_device_id)
+            score_s, score_e = net(*inputs)
+        else:
+            score_s, score_e = self.network(*inputs)
 
         # Transfer to CPU/normal tensors for numpy ops
         score_s = score_s.data.cpu()
