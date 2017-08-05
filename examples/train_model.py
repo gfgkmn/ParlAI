@@ -133,7 +133,7 @@ def main():
         parleys += 1
 
         if parleys == 2:
-            run_eval(agent, opt, 'test')
+            run_eval(agent, opt, 'test', True, 500)
             world.save_agents()
 
         if opt['num_epochs'] > 0 and parleys >= max_parleys:
@@ -204,6 +204,28 @@ def main():
             if opt['validation_patience'] > 0 and impatience >= opt['validation_patience']:
                 print('[ ran out of patience! stopping training. ]')
                 break
+
+        if world.epoch_done():
+            data_logger.info('epoch done')
+            valid_report = run_eval(agent, opt, 'valid', True, opt['validation_max_exs'])
+            if valid_report['accuracy'] > best_accuracy:
+                best_accuracy = valid_report['accuracy']
+                impatience = 0
+                print('[ new best accuracy: ' + str(best_accuracy) +  ' ]')
+                world.save_agents()
+                saved = True
+                if best_accuracy == 1:
+                    print('[ task solved! stopping. ]')
+                    break
+            else:
+                impatience += 1
+                print('[ did not beat best accuracy: {} impatience: {} ]'.format(
+                        round(best_accuracy, 4), impatience))
+            validate_time.reset()
+            if opt['validation_patience'] > 0 and impatience >= opt['validation_patience']:
+                print('[ ran out of patience! stopping training. ]')
+                break
+
     world.shutdown()
     if not saved:
         world.save_agents()

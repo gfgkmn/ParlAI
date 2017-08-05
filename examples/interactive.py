@@ -17,6 +17,7 @@ a context followed by '\n' followed by a question all as a single input.)
 from parlai.core.params import ParlaiParser
 from parlai.core.agents import create_agent
 from parlai.core.worlds import create_task
+import spacy
 
 import random
 

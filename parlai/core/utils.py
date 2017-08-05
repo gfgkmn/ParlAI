@@ -7,6 +7,10 @@
 import math
 import sys
 import time
+import json
+import requests
+
+translate_token = ""
 
 
 class Predictor(object):
@@ -87,3 +91,26 @@ def round_sigfigs(x, sigfigs=4):
     if x == 0:
         return 0
     return round(x, -math.floor(math.log10(abs(x)) - sigfigs + 1))
+
+
+def translate(astr):
+    origin_data = {
+        # "source": str(sys.argv[1]),
+        "source": astr,
+        "trans_type": "en2zh",
+        "request_id": "a11111",
+        "replaced": True,
+        "cached": True
+    }
+    json_data = json.dumps(origin_data)
+
+    return_data = requests.post(
+        'http://api.interpreter.caiyunai.com/v1/translator',
+        data=json_data,
+        headers={
+            "Content-type": "application/json",
+            "X-Authorization": "token %s" % translate_token,
+        })
+
+    # print json.loads(return_data.content)['target']
+    return eval(return_data.content)['target']

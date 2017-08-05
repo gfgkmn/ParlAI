@@ -9,6 +9,7 @@
 
 from parlai.core.agents import Agent
 from parlai.core.worlds import display_messages
+from parlai.core.utils import translate
 
 class LocalHumanAgent(Agent):
 
@@ -25,6 +26,7 @@ class LocalHumanAgent(Agent):
         reply = {}
         reply['id'] = self.getID()
         reply_text = input("Enter Your Message: ")
+        print(translate(reply_text) + '\n')
         reply_text = reply_text.replace('\\n', '\n')
         reply['episode_done'] = False
         if '[DONE]' in reply_text:
