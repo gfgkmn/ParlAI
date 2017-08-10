@@ -191,7 +191,7 @@ class StackedBRNN(nn.Module):
                 # you should concatenate zeros after question_hiddens
                 for_pad = output.unsqueeze(1)
                 # batch * max_len * feature
-                pad_hiddens = F.pad(for_pad, (0, 0, 0, x_mask.size(1) - output.size(1))).squeeze()
+                pad_hiddens = F.pad(for_pad, (0, 0, 0, x_mask.size(1) - output.size(1))).squeeze(1)
                 output = pad_hiddens
             return output
 
