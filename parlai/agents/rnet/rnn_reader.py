@@ -110,39 +110,38 @@ class RnnDocReader(nn.Module):
             padding=opt['rnn_padding'],
         )
 
+        # Output sizes of rnn encoders
+        doc_hidden_size = 2 * opt['hidden_size']
+        question_hidden_size = 2 * opt['hidden_size']
+        if opt['concat_rnn_layers']:
+            doc_hidden_size *= opt['doc_layers']
+            question_hidden_size *= opt['question_layers']
+
+
         self.gated_match_rnn = layers.GatedMatchRNN(
-                input_size=opt['hidden_size'] * 2,
-                # assert doc_rnn and question_rnn's hidden_state not concat
-                dropout_rate=opt['dropout_rnn'],
-                dropout_output=opt['dropout_rnn_output'],
-                rnn_cell_type=self.RNN_CELL_TYPES[opt['rnn_type']],
-                padding=opt['rnn_padding'],
-                is_bidirectional=True,
-                )
+            input_size=doc_hidden_size,
+            # assert doc_rnn and question_rnn's hidden_state not concat
+            dropout_rate=opt['dropout_rnn'],
+            dropout_output=opt['dropout_rnn_output'],
+            rnn_cell_type=self.RNN_CELL_TYPES[opt['rnn_type']],
+            padding=opt['rnn_padding'],
+            is_bidirectional=True, )
 
         self.self_alignment_rnn = layers.GatedMatchRNN(
-                input_size=opt['hidden_size'] * 4,
-                # assert doc_rnn and question_rnn's hidden_state not concat
-                dropout_rate=opt['dropout_rnn'],
-                dropout_output=opt['dropout_rnn_output'],
-                rnn_cell_type=self.RNN_CELL_TYPES[opt['rnn_type']],
-                padding=opt['rnn_padding'],
-                gated=False,
-                is_bidirectional=False,
-                h_weight=False
-                )
+            input_size=doc_hidden_size * 2,
+            # assert doc_rnn and question_rnn's hidden_state not concat
+            dropout_rate=opt['dropout_rnn'],
+            dropout_output=opt['dropout_rnn_output'],
+            rnn_cell_type=self.RNN_CELL_TYPES[opt['rnn_type']],
+            padding=opt['rnn_padding'],
+            gated=False,
+            is_bidirectional=False,
+            h_weight=False)
 
         self.pointer_network = layers.PointerNetwork(
-                input_size=opt['hidden_size'] * 4,
-                question_size=opt['hidden_size'] * 2,
-                rnn_cell_type=self.RNN_CELL_TYPES[opt['rnn_type']],
-                )
-        # # Output sizes of rnn encoders
-        # doc_hidden_size = 2 * opt['hidden_size']
-        # question_hidden_size = 2 * opt['hidden_size']
-        # if opt['concat_rnn_layers']:
-        #     doc_hidden_size *= opt['doc_layers']
-        #     question_hidden_size *= opt['question_layers']
+            input_size=doc_hidden_size * 2,
+            question_size=question_hidden_size,
+            rnn_cell_type=self.RNN_CELL_TYPES[opt['rnn_type']], )
 
         # # Question merging
         # if opt['question_merge'] not in ['avg', 'self_attn']:
