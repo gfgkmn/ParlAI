@@ -59,19 +59,6 @@ class RnnDocReader(nn.Module):
             char_level=True
         )
 
-        # self.question_char_rnn = layers.StackedBRNN(
-        #     input_size=opt['char_embedding_dim'],
-        #     hidden_size=opt['charemb_rnn_dim'],
-        #     num_layers=opt['question_char_layers'],
-        #     dropout_rate=opt['dropout_char_rnn'],
-        #     dropout_output=opt['dropout_char_rnn_output'],
-        #     concat_layers=False,
-        #     rnn_type=self.RNN_TYPES[opt['rnn_type']],
-        #     # padding=opt['rnn_padding'],
-        #     padding=True,
-        #     char_level=True
-        # )
-
         # Projection for attention weighted question
         if opt['use_qemb']:
             self.qemb_match = layers.SeqAttnMatch(opt['embedding_dim'] +
@@ -211,14 +198,16 @@ class RnnDocReader(nn.Module):
 
         # character-level encoding
         doc_char_encoding = self.char_rnn(x1_chars_emb, x1_chars_mask)
-        doc_char_encoding = doc_char_encoding.index_select(0, redoc)
         question_char_encoding = self.char_rnn(x2_chars_emb, x2_chars_mask)
-        question_char_encoding = question_char_encoding.index_select(0, reques)
 
         doc_char_encoding = doc_char_encoding.view(
             x1_chars_size[:-1] + doc_char_encoding.size()[-1:])
         question_char_encoding = question_char_encoding.view(
             x2_chars_size[:-1] + question_char_encoding.size()[-1:])
+
+        # rebuild document and question char-encoding
+        doc_char_encoding = doc_char_encoding.index_select(0, redoc)
+        question_char_encoding = question_char_encoding.index_select(0, reques)
 
         # Embed both document and question
         x1_emb = self.embedding(x1)
