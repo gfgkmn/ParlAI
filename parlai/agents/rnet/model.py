@@ -43,12 +43,14 @@ class DocReaderModel(object):
         # Building optimizer.
         parameters = [p for p in self.network.parameters() if p.requires_grad]
         if opt['optimizer'] == 'sgd':
-            self.optimizer = optim.SGD(parameters, opt['learning_rate'],
-                                       momentum=opt['momentum'],
-                                       weight_decay=opt['weight_decay'])
+            self.optimizer = optim.SGD(
+                parameters,
+                opt['learning_rate'],
+                momentum=opt['momentum'],
+                weight_decay=opt['weight_decay'])
         elif opt['optimizer'] == 'adamax':
-            self.optimizer = optim.Adamax(parameters,
-                                          weight_decay=opt['weight_decay'])
+            self.optimizer = optim.Adamax(
+                parameters, weight_decay=opt['weight_decay'])
         elif opt['optimizer'] == 'adadelta':
             self.optimizer = optim.Adadelta(
                 parameters,
@@ -76,8 +78,7 @@ class DocReaderModel(object):
         if new_size[0] != old_size[0]:
             logger.warning(
                 '[ WARNING: Number of embeddings changed (%d->%d) ]' %
-                (old_size[0], new_size[0])
-            )
+                (old_size[0], new_size[0]))
 
         # Swap weights
         self.network.embedding.weight.data = embeddings
@@ -94,22 +95,22 @@ class DocReaderModel(object):
 
         # Transfer to GPU
         if self.opt['cuda']:
-            inputs = [Variable(e.cuda(async=True)) for e in ex[:9]]
-            target_s = Variable(ex[9].cuda(async=True))
-            target_e = Variable(ex[10].cuda(async=True))
+            inputs = [Variable(e.cuda(async=True)) for e in ex[:11]]
+            target_s = Variable(ex[11].cuda(async=True))
+            target_e = Variable(ex[12].cuda(async=True))
         else:
-            inputs = [Variable(e) for e in ex[:9]]
-            target_s = Variable(ex[9])
-            target_e = Variable(ex[10])
+            inputs = [Variable(e) for e in ex[:11]]
+            target_s = Variable(ex[11])
+            target_e = Variable(ex[12])
 
         # Run forward
         # score_s, score_e = self.network(*inputs)
         if len(self.gpu_device_id) > 1:
-            net = torch.nn.DataParallel(self.network, device_ids=self.gpu_device_id)
+            net = torch.nn.DataParallel(
+                self.network, device_ids=self.gpu_device_id)
             score_s, score_e = net(*inputs)
         else:
             score_s, score_e = self.network(*inputs)
-        
 
         # Compute loss and accuracies
         loss = F.nll_loss(score_s, target_s) + F.nll_loss(score_e, target_e)
@@ -136,15 +137,17 @@ class DocReaderModel(object):
 
         # Transfer to GPU
         if self.opt['cuda']:
-            inputs = [Variable(e.cuda(async=True), volatile=True)
-                      for e in ex[:9]]
+            inputs = [
+                Variable(e.cuda(async=True), volatile=True) for e in ex[:11]
+            ]
         else:
-            inputs = [Variable(e, volatile=True) for e in ex[:9]]
+            inputs = [Variable(e, volatile=True) for e in ex[:11]]
 
         # Run forward
         # score_s, score_e = self.network(*inputs)
         if len(self.gpu_device_id) > 1:
-            net = torch.nn.DataParallel(self.network, device_ids=self.gpu_device_id)
+            net = torch.nn.DataParallel(
+                self.network, device_ids=self.gpu_device_id)
             score_s, score_e = net(*inputs)
         else:
             score_s, score_e = self.network(*inputs)

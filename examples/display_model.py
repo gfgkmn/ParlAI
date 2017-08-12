@@ -39,7 +39,7 @@ def translate(astr):
         data=json_data,
         headers={
             "Content-type": "application/json",
-            "X-Authorization": "token " % translate_token,
+            "X-Authorization": "token %s" % translate_token,
         })
 
     # print json.loads(return_data.content)['target']

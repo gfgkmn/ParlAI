@@ -168,10 +168,13 @@ class StackedBRNN(nn.Module):
             output = outputs[-1]
 
         if self.char_level:
-            output_hiddens = Variable(
-                torch.cat((output_hiddens.data, torch.zeros(
+            pad_variable = torch.zeros(
                     batch_size - first_zero_index, output_hiddens.size(-1))
-                           .cuda())))
+            if output_hiddens.data.is_cuda:
+                pad_variable = pad_variable.cuda()
+
+            output_hiddens = Variable(
+                torch.cat((output_hiddens.data, pad_variable)))
             output_hiddens = output_hiddens.index_select(0, idx_unsort)
             return output_hiddens
         else:

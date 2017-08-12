@@ -97,17 +97,25 @@ def vectorize(opt, ex, word_dict, feature_dict):
     question = torch.LongTensor([word_dict[w] for w in ex['question']])
     # cause there is no charater whose ord value equal 0, so use 0 represent
     # unknow, or out of character table.
+    redoc_p2w = dict(enumerate(ex['document']))
+    usedoc_w2p = {w: p for p, w in enumerate(set(ex['document']))}
+    rebuild_doc_info = torch.LongTensor(
+        [usedoc_w2p[redoc_p2w[i]] for i in range(redoc_p2w)])
     document_chars = [
         torch.LongTensor([
             char_dict[ord(i)] if ord(i) in char_dict else char_dict[0]
             for i in w
-        ]) for w in ex['document']
+        ]) for w in usedoc_w2p
     ]
+    reques_p2w = dict(enumerate(ex['question']))
+    useques_w2p = {w: p for p, w in enumerate(set(ex['question']))}
+    rebuild_ques_info = torch.LongTensor(
+        [useques_w2p[reques_p2w[i]] for i in range(reques_p2w)])
     question_chars = [
         torch.LongTensor([
             char_dict[ord(i)] if ord(i) in char_dict else char_dict[0]
             for i in w
-        ]) for w in ex['question']
+        ]) for w in useques_w2p
     ]
 
     # Create extra features vector
@@ -163,14 +171,15 @@ def vectorize(opt, ex, word_dict, feature_dict):
 
     # Maybe return without target
     if ex['target'] is None:
-        return document, document_chars, features, question, question_chars
+        return document, document_chars, rebuild_doc_info, features, \
+                question, question_chars, rebuild_ques_info
 
     # ...or with target
     start = torch.LongTensor(1).fill_(ex['target'][0])
     end = torch.LongTensor(1).fill_(ex['target'][1])
 
-    return document, document_chars, features, question, \
-        question_chars, start, end
+    return document, document_chars, rebuild_doc_info, features, question, \
+        question_chars, rebuild_ques_info, start, end
 
 
 def batchify(batch, null=0, cuda=False):
@@ -178,16 +187,18 @@ def batchify(batch, null=0, cuda=False):
     Collate inputs into batches.
     generate input matrix and vector for batch.
     """
-    NUM_INPUTS = 5
+    NUM_INPUTS = 7
     NUM_TARGETS = 2
     NUM_EXTRA = 2
 
     # Get elements
     docs = [ex[0] for ex in batch]
     doc_chars = [ex[1] for ex in batch]
-    features = [ex[2] for ex in batch]
-    questions = [ex[3] for ex in batch]
-    question_chars = [ex[4] for ex in batch]
+    rebuild_doc_info = [ex[2] for ex in batch]
+    features = [ex[3] for ex in batch]
+    questions = [ex[4] for ex in batch]
+    question_chars = [ex[5] for ex in batch]
+    rebuild_ques_info = [ex[6] for ex in batch]
     text = [ex[-2] for ex in batch]
     spans = [ex[-1] for ex in batch]
     # we couldn't sure ex[5] and ex[6] is exist.
@@ -200,10 +211,10 @@ def batchify(batch, null=0, cuda=False):
     x1_mask = torch.ByteTensor(len(docs), max_length).fill_(1)
     if len(features[0].size()) > 1:
         x1_f = torch.zeros(len(docs), max_length, features[0].size(1))
-        no_manual_feature = False 
+        no_manual_feature = False
     else:
         x1_f = torch.zeros(len(docs))
-        no_manual_feature = True 
+        no_manual_feature = True
     # (samples, doc_lengths(time_steps), features)
     for i, d in enumerate(docs):
         x1[i, :d.size(0)].copy_(d)
@@ -266,14 +277,16 @@ def batchify(batch, null=0, cuda=False):
     # Maybe return without targets
     if len(batch[0]) == NUM_INPUTS + NUM_EXTRA:
         return x1, x1_f, x1_mask, x1_chars, x1_chars_mask, x2, x2_mask, \
-                x2_chars, x2_chars_mask, text, spans
+               x2_chars, x2_chars_mask, rebuild_doc_info, \
+               rebuild_ques_info, text, spans
 
     # ...Otherwise add targets
     elif len(batch[0]) == NUM_INPUTS + NUM_EXTRA + NUM_TARGETS:
         y_s = torch.cat([ex[5] for ex in batch])
         y_e = torch.cat([ex[6] for ex in batch])
         return x1, x1_f, x1_mask, x1_chars, x1_chars_mask, x2, x2_mask, \
-            x2_chars, x2_chars_mask, y_s, y_e, text, spans
+            x2_chars, x2_chars_mask, rebuild_doc_info, rebuild_ques_info, \
+            y_s, y_e, text, spans
     # start-position and end position vector
 
     # ...Otherwise wrong number of inputs

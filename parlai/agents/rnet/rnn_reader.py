@@ -46,7 +46,7 @@ class RnnDocReader(nn.Module):
             self.register_buffer('fixed_embedding', torch.Tensor(buffer_size))
 
         # RNN docuemnt character encoder
-        self.doc_char_rnn = layers.StackedBRNN(
+        self.char_rnn = layers.StackedBRNN(
             input_size=opt['char_embedding_dim'],
             hidden_size=opt['charemb_rnn_dim'],
             num_layers=opt['doc_char_layers'],
@@ -59,18 +59,18 @@ class RnnDocReader(nn.Module):
             char_level=True
         )
 
-        self.question_char_rnn = layers.StackedBRNN(
-            input_size=opt['char_embedding_dim'],
-            hidden_size=opt['charemb_rnn_dim'],
-            num_layers=opt['question_char_layers'],
-            dropout_rate=opt['dropout_char_rnn'],
-            dropout_output=opt['dropout_char_rnn_output'],
-            concat_layers=False,
-            rnn_type=self.RNN_TYPES[opt['rnn_type']],
-            # padding=opt['rnn_padding'],
-            padding=True,
-            char_level=True
-        )
+        # self.question_char_rnn = layers.StackedBRNN(
+        #     input_size=opt['char_embedding_dim'],
+        #     hidden_size=opt['charemb_rnn_dim'],
+        #     num_layers=opt['question_char_layers'],
+        #     dropout_rate=opt['dropout_char_rnn'],
+        #     dropout_output=opt['dropout_char_rnn_output'],
+        #     concat_layers=False,
+        #     rnn_type=self.RNN_TYPES[opt['rnn_type']],
+        #     # padding=opt['rnn_padding'],
+        #     padding=True,
+        #     char_level=True
+        # )
 
         # Projection for attention weighted question
         if opt['use_qemb']:
@@ -163,7 +163,7 @@ class RnnDocReader(nn.Module):
         # )
 
     def forward(self, x1, x1_f, x1_mask, x1_chars, x1_chars_mask, x2, x2_mask,
-                x2_chars, x2_chars_mask):
+                x2_chars, x2_chars_mask, redoc, reques):
         """Inputs:
         x1 = document word indices                 [ batch * len_d]
         x1_f = document word features indices      [ batch * len_d * nfeat]
@@ -174,6 +174,8 @@ class RnnDocReader(nn.Module):
         x2_mask = question padding mask            [ batch * len_q]
         x2_chars = document character indices      [ batch * len_q * len_c]
         x2_chars_mask = document character indices [ batch * len_q * len_c]
+        redoc = rebuild document char encoding     [ batch ]
+        reques = rebuild question char encoding    [ batch ]
         """
 
         if len(x1_f.size()) == 1:
@@ -208,9 +210,10 @@ class RnnDocReader(nn.Module):
                 training=self.training)
 
         # character-level encoding
-        doc_char_encoding = self.doc_char_rnn(x1_chars_emb, x1_chars_mask)
-        question_char_encoding = self.question_char_rnn(
-            x2_chars_emb, x2_chars_mask)
+        doc_char_encoding = self.char_rnn(x1_chars_emb, x1_chars_mask)
+        doc_char_encoding = doc_char_encoding.index_select(0, redoc)
+        question_char_encoding = self.char_rnn(x2_chars_emb, x2_chars_mask)
+        question_char_encoding = question_char_encoding.index_select(0, reques)
 
         doc_char_encoding = doc_char_encoding.view(
             x1_chars_size[:-1] + doc_char_encoding.size()[-1:])
