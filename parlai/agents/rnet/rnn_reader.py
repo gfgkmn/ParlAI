@@ -8,6 +8,7 @@ import torch.nn as nn
 from . import layers
 from .utils import charvob_size
 from torch.autograd import Variable
+import torch.nn.functional as F
 
 
 class RnnDocReader(nn.Module):
@@ -173,9 +174,6 @@ class RnnDocReader(nn.Module):
         doc_length = x1.size(1)
         question_length = x2.size(1)
 
-        doc_lengths = x1_mask.data.eq(0).long().sum(1).squeeze()
-        ques_lengths = x2_mask.data.eq(0).long().sum(1).squeeze()
-
         x1_chars_emb = self.char_embedding(x1_chars)
         x2_chars_emb = self.char_embedding(x2_chars)
 
@@ -196,22 +194,47 @@ class RnnDocReader(nn.Module):
 
         # rebuild document and question char-encoding
         doc_char_rebuild = Variable(
-            torch.Tensor(batch_size, doc_length, doc_char_encoding.size(-1))
+            torch.Tensor(batch_size * doc_length, doc_char_encoding.size(-1))
             .fill_(0))
         question_char_rebuild = Variable(
-            torch.Tensor(batch_size, question_length,
+            torch.Tensor(batch_size * question_length,
                          doc_char_encoding.size(-1)).fill_(0))
 
         if x1.data.is_cuda:
             doc_char_rebuild = doc_char_rebuild.cuda()
             question_char_rebuild = question_char_rebuild.cuda()
-        for i in range(batch_size):
-            doc_char_rebuild[i, :doc_lengths[i]].data.copy_(
-                doc_char_encoding.index_select(0, redoc[i][:doc_lengths[i]])
-                .data)
-            question_char_rebuild[i, :ques_lengths[i]].data.copy_(
-                question_char_encoding.index_select(0, reques[i][:ques_lengths[
-                    i]]).data)
+
+        # rebuild doc char encoding
+        redoc = redoc.view(-1)
+        # batch * len_d
+        redoc_order, idx_sort = torch.sort(redoc, dim=0, descending=True)
+        _, idx_unsort = torch.sort(idx_sort, dim=0)
+
+        doc_batch = doc_char_encoding.index_select(
+            0, redoc_order[redoc_order.ne(-1)])
+        doc_batch_pad = doc_batch.unsqueeze(0).unsqueeze(0)
+        doc_batch_pad = F.pad(
+            doc_batch_pad,
+            (0, 0, 0, batch_size * doc_length - doc_batch.size(0))).squeeze()
+        doc_char_rebuild = doc_batch_pad.index_select(0, idx_unsort)
+        doc_char_rebuild = doc_char_rebuild.view(batch_size, doc_length, -1)
+
+        # rebuild ques char encoding
+        reques = reques.view(-1)
+        # batch * len_d
+        reques_order, idx_sort = torch.sort(reques, dim=0, descending=True)
+        _, idx_unsort = torch.sort(idx_sort, dim=0)
+
+        ques_batch = question_char_encoding.index_select(
+            0, reques_order[reques_order.ne(-1)])
+        ques_batch_pad = ques_batch.unsqueeze(0).unsqueeze(0)
+        ques_batch_pad = F.pad(
+            ques_batch_pad,
+            (0, 0, 0,
+             batch_size * question_length - ques_batch.size(0))).squeeze()
+        question_char_rebuild = ques_batch_pad.index_select(0, idx_unsort)
+        question_char_rebuild = question_char_rebuild.view(
+            batch_size, question_length, -1)
 
         # Embed both document and question
         x1_emb = self.embedding(x1)

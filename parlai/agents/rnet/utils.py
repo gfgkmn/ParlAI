@@ -244,7 +244,7 @@ def batchify(batch, null=0, cuda=False):
             batch_w2t[w])
         # word in batch new position, word correspond character encoding
         x1_chars_mask[batch_order_chars[w], :batch_w2t[w].size(0)].fill_(0)
-    doc_char_rebuild = torch.LongTensor(len(docs), max_length).fill_(null)
+    doc_char_rebuild = torch.LongTensor(len(docs), max_length).fill_(-1)
     for bi, index_info in enumerate(rebuild_doc_infos):
         p2w, w2p = index_info
         doc_char_rebuild[bi, :len(p2w)].copy_(
@@ -260,7 +260,7 @@ def batchify(batch, null=0, cuda=False):
         x2_mask[i, :q.size(0)].fill_(0)
     # fill question matrix.
 
-    # Batch char document
+    # Batch char question
     batch_w2t = dict()
     max_char_length = 0
     for bi, index_info in enumerate(rebuild_ques_infos):
@@ -284,7 +284,7 @@ def batchify(batch, null=0, cuda=False):
         # word in batch new position, word correspond character encoding
         x2_chars_mask[batch_order_chars[w], :batch_w2t[w].size(0)].fill_(0)
     question_char_rebuild = torch.LongTensor(len(questions),
-                                             max_length).fill_(null)
+                                             max_length).fill_(-1)
     for bi, index_info in enumerate(rebuild_ques_infos):
         p2w, w2p = index_info
         question_char_rebuild[bi, :len(p2w)].copy_(
@@ -303,6 +303,8 @@ def batchify(batch, null=0, cuda=False):
         x2_mask = x2_mask.pin_memory()
         x2_chars = x2_chars.pin_memory()
         x2_chars_mask = x2_chars_mask.pin_memory()
+        doc_char_rebuild = doc_char_rebuild.pin_memory()
+        question_char_rebuild = question_char_rebuild.pin_memory()
 
     # Maybe return without targets
     if len(batch[0]) == NUM_INPUTS + NUM_EXTRA:
