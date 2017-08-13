@@ -13,6 +13,7 @@ import os
 import sys
 from parlai.core.agents import get_agent_module, get_task_module
 from parlai.tasks.tasks import ids_to_tasks
+import torch
 
 def str2bool(value):
     v = value.lower()

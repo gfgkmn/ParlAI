@@ -97,20 +97,18 @@ def vectorize(opt, ex, word_dict, feature_dict):
     question = torch.LongTensor([word_dict[w] for w in ex['question']])
     # cause there is no charater whose ord value equal 0, so use 0 represent
     # unknow, or out of character table.
-    redoc_p2w = dict(enumerate(ex['document']))
+    redoc_p2w = ex['document']
     usedoc_w2p = {w: p for p, w in enumerate(set(ex['document']))}
-    rebuild_doc_info = torch.LongTensor(
-        [usedoc_w2p[redoc_p2w[i]] for i in range(redoc_p2w)])
+    rebuild_doc_info = (redoc_p2w, usedoc_w2p)
     document_chars = [
         torch.LongTensor([
             char_dict[ord(i)] if ord(i) in char_dict else char_dict[0]
             for i in w
         ]) for w in usedoc_w2p
     ]
-    reques_p2w = dict(enumerate(ex['question']))
+    reques_p2w = ex['question']
     useques_w2p = {w: p for p, w in enumerate(set(ex['question']))}
-    rebuild_ques_info = torch.LongTensor(
-        [useques_w2p[reques_p2w[i]] for i in range(reques_p2w)])
+    rebuild_ques_info = (reques_p2w, useques_w2p)
     question_chars = [
         torch.LongTensor([
             char_dict[ord(i)] if ord(i) in char_dict else char_dict[0]
@@ -194,14 +192,14 @@ def batchify(batch, null=0, cuda=False):
     # Get elements
     docs = [ex[0] for ex in batch]
     doc_chars = [ex[1] for ex in batch]
-    rebuild_doc_info = [ex[2] for ex in batch]
+    rebuild_doc_infos = [ex[2] for ex in batch]
     features = [ex[3] for ex in batch]
     questions = [ex[4] for ex in batch]
     question_chars = [ex[5] for ex in batch]
-    rebuild_ques_info = [ex[6] for ex in batch]
+    rebuild_ques_infos = [ex[6] for ex in batch]
     text = [ex[-2] for ex in batch]
     spans = [ex[-1] for ex in batch]
-    # we couldn't sure ex[5] and ex[6] is exist.
+    # we couldn't sure ex[7] and ex[8] is exist.
 
     # Batch documents and features
     max_length = max([d.size(0) for d in docs])
@@ -223,18 +221,34 @@ def batchify(batch, null=0, cuda=False):
             x1_f[i, :d.size(0)].copy_(features[i])
     # fill document matrix.
 
-    # Batch char docuemnt
-    max_char_length = max([max([c.size(0) for c in w]) for w in doc_chars])
-    x1_chars = torch.LongTensor(len(docs), max_length,
-                                max_char_length).fill_(null)
+    # Batch char document
+    batch_w2t = dict()
+    max_char_length = 0
+    for bi, index_info in enumerate(rebuild_doc_infos):
+        # to get word -> character tensor corresponding
+        # and max word length
+        p2w, w2p = index_info
+        for w in w2p:
+            if w not in batch_w2t:
+                batch_w2t[w] = doc_chars[bi][w2p[w]]
+                if len(doc_chars[bi][w2p[w]]) > max_char_length:
+                    max_char_length = len(doc_chars[bi][w2p[w]])
+    batch_order_chars = {w: new_pos for new_pos, w in enumerate(batch_w2t)}
+
+    x1_chars = torch.LongTensor(len(batch_w2t), max_char_length).fill_(null)
     # (samples, doc_lengths(time_steps))
-    x1_chars_mask = torch.ByteTensor(len(docs), max_length,
-                                     max_char_length).fill_(1)
+    x1_chars_mask = torch.ByteTensor(len(batch_w2t), max_char_length).fill_(1)
     # (samples, doc_lengths(time_steps), features)
-    for i, d in enumerate(doc_chars):
-        for j, c in enumerate(d):
-            x1_chars[i, j, :c.size(0)].copy_(c)
-            x1_chars_mask[i, j, :c.size(0)].fill_(0)
+    for w in batch_order_chars:
+        x1_chars[batch_order_chars[w], :batch_w2t[w].size(0)].copy_(
+            batch_w2t[w])
+        # word in batch new position, word correspond character encoding
+        x1_chars_mask[batch_order_chars[w], :batch_w2t[w].size(0)].fill_(0)
+    doc_char_rebuild = torch.LongTensor(len(docs), max_length).fill_(null)
+    for bi, index_info in enumerate(rebuild_doc_infos):
+        p2w, w2p = index_info
+        doc_char_rebuild[bi, :len(p2w)].copy_(
+            torch.LongTensor([batch_order_chars[w] for w in p2w]))
     # fill document_chars matrix.
 
     # Batch questions
@@ -246,20 +260,36 @@ def batchify(batch, null=0, cuda=False):
         x2_mask[i, :q.size(0)].fill_(0)
     # fill question matrix.
 
-    # Batch char docuemnt
-    max_char_length = max(
-        [max([c.size(0) for c in w]) for w in question_chars])
-    x2_chars = torch.LongTensor(len(questions), max_length,
-                                max_char_length).fill_(null)
+    # Batch char document
+    batch_w2t = dict()
+    max_char_length = 0
+    for bi, index_info in enumerate(rebuild_ques_infos):
+        # to get word -> character tensor corresponding
+        # and max word length
+        p2w, w2p = index_info
+        for w in w2p:
+            if w not in batch_w2t:
+                batch_w2t[w] = question_chars[bi][w2p[w]]
+                if len(question_chars[bi][w2p[w]]) > max_char_length:
+                    max_char_length = len(question_chars[bi][w2p[w]])
+    batch_order_chars = {w: new_pos for new_pos, w in enumerate(batch_w2t)}
+
+    x2_chars = torch.LongTensor(len(batch_w2t), max_char_length).fill_(null)
     # (samples, doc_lengths(time_steps))
-    x2_chars_mask = torch.ByteTensor(len(questions), max_length,
-                                     max_char_length).fill_(1)
+    x2_chars_mask = torch.ByteTensor(len(batch_w2t), max_char_length).fill_(1)
     # (samples, doc_lengths(time_steps), features)
-    for i, d in enumerate(question_chars):
-        for j, c in enumerate(d):
-            x2_chars[i, j, :c.size(0)].copy_(c)
-            x2_chars_mask[i, j, :c.size(0)].fill_(0)
-    # fill question_chars matrix.
+    for w in batch_order_chars:
+        x2_chars[batch_order_chars[w], :batch_w2t[w].size(0)].copy_(
+            batch_w2t[w])
+        # word in batch new position, word correspond character encoding
+        x2_chars_mask[batch_order_chars[w], :batch_w2t[w].size(0)].fill_(0)
+    question_char_rebuild = torch.LongTensor(len(questions),
+                                             max_length).fill_(null)
+    for bi, index_info in enumerate(rebuild_ques_infos):
+        p2w, w2p = index_info
+        question_char_rebuild[bi, :len(p2w)].copy_(
+            torch.LongTensor([batch_order_chars[w] for w in p2w]))
+    # fill document_chars matrix.
 
     # Pin memory if cuda
     if cuda:
@@ -277,15 +307,15 @@ def batchify(batch, null=0, cuda=False):
     # Maybe return without targets
     if len(batch[0]) == NUM_INPUTS + NUM_EXTRA:
         return x1, x1_f, x1_mask, x1_chars, x1_chars_mask, x2, x2_mask, \
-               x2_chars, x2_chars_mask, rebuild_doc_info, \
-               rebuild_ques_info, text, spans
+               x2_chars, x2_chars_mask, doc_char_rebuild, \
+               question_char_rebuild, text, spans
 
     # ...Otherwise add targets
     elif len(batch[0]) == NUM_INPUTS + NUM_EXTRA + NUM_TARGETS:
-        y_s = torch.cat([ex[5] for ex in batch])
-        y_e = torch.cat([ex[6] for ex in batch])
+        y_s = torch.cat([ex[7] for ex in batch])
+        y_e = torch.cat([ex[8] for ex in batch])
         return x1, x1_f, x1_mask, x1_chars, x1_chars_mask, x2, x2_mask, \
-            x2_chars, x2_chars_mask, rebuild_doc_info, rebuild_ques_info, \
+            x2_chars, x2_chars_mask, doc_char_rebuild, question_char_rebuild, \
             y_s, y_e, text, spans
     # start-position and end position vector
 

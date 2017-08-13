@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from . import layers
 from .utils import charvob_size
+from torch.autograd import Variable
 
 
 class RnnDocReader(nn.Module):
@@ -104,7 +105,6 @@ class RnnDocReader(nn.Module):
             doc_hidden_size *= opt['doc_layers']
             question_hidden_size *= opt['question_layers']
 
-
         self.gated_match_rnn = layers.GatedMatchRNN(
             input_size=doc_hidden_size,
             # assert doc_rnn and question_rnn's hidden_state not concat
@@ -139,13 +139,11 @@ class RnnDocReader(nn.Module):
 
         # # Bilinear attention for span start/end
         # self.start_attn = layers.BilinearSeqAttn(
-        #     # doc_hidden_size,
-        #     doc_input_size * 2,
+        #     doc_hidden_size,
         #     question_hidden_size,
         # )
         # self.end_attn = layers.BilinearSeqAttn(
-        #     # doc_hidden_size,
-        #     doc_input_size * 2,
+        #     doc_hidden_size,
         #     question_hidden_size,
         # )
 
@@ -155,14 +153,14 @@ class RnnDocReader(nn.Module):
         x1 = document word indices                 [ batch * len_d]
         x1_f = document word features indices      [ batch * len_d * nfeat]
         x1_mask = document padding mask            [ batch * len_d]
-        x1_chars = document character indices      [ batch * len_d * len_c]
-        x1_chars_mask = document character indices [ batch * len_d * len_c]
+        x1_chars = document character indices      [ batch2 * len_d * len_c]
+        x1_chars_mask = document character indices [ batch2 * len_d * len_c]
         x2 = question word indices                 [ batch * len_q]
         x2_mask = question padding mask            [ batch * len_q]
-        x2_chars = document character indices      [ batch * len_q * len_c]
-        x2_chars_mask = document character indices [ batch * len_q * len_c]
-        redoc = rebuild document char encoding     [ batch ]
-        reques = rebuild question char encoding    [ batch ]
+        x2_chars = document character indices      [ batch3 * len_q * len_c]
+        x2_chars_mask = document character indices [ batch3 * len_q * len_c]
+        redoc = rebuild document char encoding     [ batch * len_d]
+        reques = rebuild question char encoding    [ batch * len_q]
         """
 
         if len(x1_f.size()) == 1:
@@ -171,19 +169,15 @@ class RnnDocReader(nn.Module):
         else:
             no_manual_feature = False
 
-        x1_chars_size = x1_chars.size()
-        x2_chars_size = x2_chars.size()
+        batch_size = x1.size(0)
+        doc_length = x1.size(1)
+        question_length = x2.size(1)
 
-        x1_chars_emb = self.char_embedding(
-            x1_chars.view(-1, x1_chars.size(-1)))
-        x2_chars_emb = self.char_embedding(
-            x2_chars.view(-1, x2_chars.size(-1)))
-        x1_chars_mask = x1_chars_mask.view(-1, x1_chars_mask.size(-1))
-        x2_chars_mask = x2_chars_mask.view(-1, x2_chars_mask.size(-1))
-        # emb shape [batch * len_d , len_c, char_emb_dim]
+        doc_lengths = x1_mask.data.eq(0).long().sum(1).squeeze()
+        ques_lengths = x2_mask.data.eq(0).long().sum(1).squeeze()
 
-        # todo cache mechanism to cache same word charater-level encoding for
-        # computer just once in batch
+        x1_chars_emb = self.char_embedding(x1_chars)
+        x2_chars_emb = self.char_embedding(x2_chars)
 
         # Dropout on character-level embeddings
         if self.opt['dropout_char_emb'] > 0:
@@ -200,14 +194,24 @@ class RnnDocReader(nn.Module):
         doc_char_encoding = self.char_rnn(x1_chars_emb, x1_chars_mask)
         question_char_encoding = self.char_rnn(x2_chars_emb, x2_chars_mask)
 
-        doc_char_encoding = doc_char_encoding.view(
-            x1_chars_size[:-1] + doc_char_encoding.size()[-1:])
-        question_char_encoding = question_char_encoding.view(
-            x2_chars_size[:-1] + question_char_encoding.size()[-1:])
-
         # rebuild document and question char-encoding
-        doc_char_encoding = doc_char_encoding.index_select(0, redoc)
-        question_char_encoding = question_char_encoding.index_select(0, reques)
+        doc_char_rebuild = Variable(
+            torch.Tensor(batch_size, doc_length, doc_char_encoding.size(-1))
+            .fill_(0))
+        question_char_rebuild = Variable(
+            torch.Tensor(batch_size, question_length,
+                         doc_char_encoding.size(-1)).fill_(0))
+
+        if x1.data.is_cuda:
+            doc_char_rebuild = doc_char_rebuild.cuda()
+            question_char_rebuild = question_char_rebuild.cuda()
+        for i in range(batch_size):
+            doc_char_rebuild[i, :doc_lengths[i]].data.copy_(
+                doc_char_encoding.index_select(0, redoc[i][:doc_lengths[i]])
+                .data)
+            question_char_rebuild[i, :ques_lengths[i]].data.copy_(
+                question_char_encoding.index_select(0, reques[i][:ques_lengths[
+                    i]]).data)
 
         # Embed both document and question
         x1_emb = self.embedding(x1)
@@ -221,8 +225,8 @@ class RnnDocReader(nn.Module):
                                            training=self.training)
 
         # concatenate word-level and character-level encoding
-        x1_emb = torch.cat([x1_emb, doc_char_encoding], 2)
-        x2_emb = torch.cat([x2_emb, question_char_encoding], 2)
+        x1_emb = torch.cat([x1_emb, doc_char_rebuild], 2)
+        x2_emb = torch.cat([x2_emb, question_char_rebuild], 2)
 
         # Add attention-weighted question representation
         if self.opt['use_qemb']:
@@ -248,7 +252,7 @@ class RnnDocReader(nn.Module):
                                       x2_mask)
         start_scores, end_scores = scores
 
-        # Encode question with RNN + merge hiddens
+        # # Encode question with RNN + merge hiddens
         # if self.opt['question_merge'] == 'avg':
         #     q_merge_weights = layers.uniform_weights(
         #             question_hiddens, x2_mask)
