@@ -10,17 +10,6 @@ from collections import Counter
 import spacy
 
 NLP = spacy.load('en')
-pos_list = [
-    'DET', 'ADP', 'PART', 'ADJ', 'PUNCT', 'INTJ', 'NOUN', 'ADV', 'X', 'PRON',
-    'PROPN', 'VERB', 'CONJ', 'SPACE', 'NUM', 'SYM', 'CCONJ'
-]
-ner_list = [
-    'QUANTITY', 'PRODUCT', 'EVENT', 'FACILITY', 'NORP', 'TIME', 'LANGUAGE',
-    'ORG', 'DATE', 'CARDINAL', 'PERSON', 'ORDINAL', 'LOC', 'PERCENT', 'MONEY',
-    'WORK_OF_ART', 'GPE', 'FAC', 'LAW'
-]
-pos_dict = {i: pos_list.index(i)/len(pos_list) for i in pos_list}
-ner_dict = {i: ner_list.index(i)/len(ner_list) for i in ner_list}
 
 
 # ------------------------------------------------------------------------------
@@ -56,7 +45,7 @@ def load_embeddings(opt, word_dict):
     return embeddings
 
 
-def build_feature_dict(opt):
+def build_feature_dict(opt, dic_property):
     """Make mapping of feature option to feature index."""
     # add manual features to this agent.
     # i know why you initialize DocumentReader with featuredict
@@ -67,9 +56,11 @@ def build_feature_dict(opt):
     if opt['use_tf']:
         feature_dict['tf'] = len(feature_dict)
     if opt['use_ner']:
-        feature_dict['ner_type'] = len(feature_dict)
+        for ner_type in dic_property['ner']:
+            feature_dict['ner=%s' % ner_type] = len(feature_dict)
     if opt['use_pos']:
-        feature_dict['pos_type'] = len(feature_dict)
+        for ner_type in dic_property['pos']:
+            feature_dict['pos=%s' % ner_type] = len(feature_dict)
     if opt['use_time'] > 0:
         for i in range(opt['use_time'] - 1):
             feature_dict['time=T%d' % (i + 1)] = len(feature_dict)
@@ -113,30 +104,12 @@ def vectorize(opt, ex, word_dict, feature_dict):
     if opt['use_ner']:
         for i, w in enumerate(ex['document']):
             if spacy_doc[i].ent_type_:
-                try:
-                    features[i][feature_dict['ner_type']] = ner_dict[spacy_doc[
-                        i].ent_type_]
-                except KeyError:
-                    print('-' * 40)
-                    print('ner_error)')
-                    print(len(ex['document']))
-                    print(len(spacy_doc))
-                    print(spacy_doc[i].ent_type_)
-                    print('-' * 40)
+                features[i][feature_dict['ner=%s' % spacy_doc[i].ent_type_]] = 1.0
 
     if opt['use_pos']:
         for i, w in enumerate(ex['document']):
             if spacy_doc[i].pos_:
-                try:
-                    features[i][feature_dict['pos_type']] = pos_dict[spacy_doc[
-                        i].pos_]
-                except KeyError:
-                    print('-' * 40)
-                    print('pos error')
-                    print(len(ex['document']))
-                    print(len(spacy_doc))
-                    print(spacy_doc[i].pos_)
-                    print('-' * 40)
+                features[i][feature_dict['pos=%s' % spacy_doc[i].pos_]] = 1.0
 
     if opt['use_time'] > 0:
         # Counting from the end, each (full-stop terminated) sentence gets

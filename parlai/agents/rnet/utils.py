@@ -10,25 +10,18 @@ from collections import Counter
 import spacy
 
 NLP = spacy.load('en')
-pos_list = [
-    'DET', 'ADP', 'PART', 'ADJ', 'PUNCT', 'INTJ', 'NOUN', 'ADV', 'X', 'PRON',
-    'PROPN', 'VERB', 'CONJ', 'SPACE', 'NUM', 'SYM', 'CCONJ'
-]
-ner_list = [
-    'QUANTITY', 'PRODUCT', 'EVENT', 'FACILITY', 'NORP', 'TIME', 'LANGUAGE',
-    'ORG', 'DATE', 'CARDINAL', 'PERSON', 'ORDINAL', 'LOC', 'PERCENT', 'MONEY',
-    'WORK_OF_ART', 'GPE', 'FAC', 'LAW'
-]
-pos_dict = {i: pos_list.index(i)/len(pos_list) for i in pos_list}
-ner_dict = {i: ner_list.index(i)/len(ner_list) for i in ner_list}
 
 # charset = string.ascii_letters + string.digits + string.punctuation
 charset = set([0, 10, 8211, 257] + list(range(32, 241))) - set(
     [127, 192, 193, 211, 221, 222, 223, 238])
-charset = list(charset)
+charset = sorted(list(charset))
 char_dict = {i: charset.index(i) for i in charset}
 char_dict[0] = len(char_dict)
+# 0, mean's unknow, but when initialize tensor , default value is also zero.
+# so you should distinct unkown and null. you set 0 to other value. to make sure
+# 0 is 0
 charvob_size = len(charset) + 1
+# cause for embedding, you have pad
 
 
 # ------------------------------------------------------------------------------
@@ -75,9 +68,11 @@ def build_feature_dict(opt):
     if opt['use_tf']:
         feature_dict['tf'] = len(feature_dict)
     if opt['use_ner']:
-        feature_dict['ner_type'] = len(feature_dict)
+        for ner_type in dic_property['ner']:
+            feature_dict['ner=%s' % ner_type] = len(feature_dict)
     if opt['use_pos']:
-        feature_dict['pos_type'] = len(feature_dict)
+        for ner_type in dic_property['pos']:
+            feature_dict['pos=%s' % ner_type] = len(feature_dict)
     if opt['use_time'] > 0:
         for i in range(opt['use_time'] - 1):
             feature_dict['time=T%d' % (i + 1)] = len(feature_dict)
@@ -141,14 +136,12 @@ def vectorize(opt, ex, word_dict, feature_dict):
     if opt['use_ner']:
         for i, w in enumerate(ex['document']):
             if spacy_doc[i].ent_type_:
-                features[i][feature_dict['ner_type']] = ner_dict[spacy_doc[
-                    i].ent_type_]
+                features[i][feature_dict['ner=%s' % spacy_doc[i].ent_type_]] = 1.0
 
     if opt['use_pos']:
         for i, w in enumerate(ex['document']):
             if spacy_doc[i].pos_:
-                features[i][feature_dict['pos_type']] = pos_dict[spacy_doc[
-                    i].pos_]
+                features[i][feature_dict['pos=%s' % spacy_doc[i].pos_]] = 1.0
 
     if opt['use_time'] > 0:
         # Counting from the end, each (full-stop terminated) sentence gets

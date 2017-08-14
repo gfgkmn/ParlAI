@@ -70,9 +70,7 @@ def run_eval(agent, opt, datatype, max_exs=-1, write_log=False, valid_world=None
     metrics = datatype + ':' + str(valid_report)
     print(metrics)
     data_logger.info(metrics)
-    if still_training:
-        return valid_report
-    elif write_log and opt['model_file']:
+    if write_log and opt['model_file']:
         # Write out metrics
         f = open(opt['model_file'] + '.' + datatype, 'a+')
         f.write(metrics + '\n')
@@ -106,7 +104,7 @@ def main():
                         help=('number of iterations of validation where result '
                               + 'does not improve before we stop training'))
     train.add_argument('-dbf', '--dict-build-first',
-                        type='bool', default=True,
+                        type='bool', default=False,
                         help='build dictionary first before training agent')
     opt = parser.parse_args()
 
@@ -144,7 +142,7 @@ def main():
         parleys += 1
 
         if parleys == 2:
-            run_eval(agent, opt, 'test', True, 500)
+            run_eval(agent, opt, 'test', 500, True)
             world.save_agents()
 
         if opt['num_epochs'] > 0 and parleys >= max_parleys:
@@ -218,7 +216,7 @@ def main():
 
         if world.epoch_done():
             data_logger.info('epoch done')
-            valid_report = run_eval(agent, opt, 'valid', True, opt['validation_max_exs'])
+            valid_report = run_eval(agent, opt, 'valid', opt['validation_max_exs'], True)
             if valid_report['accuracy'] > best_accuracy:
                 best_accuracy = valid_report['accuracy']
                 impatience = 0
