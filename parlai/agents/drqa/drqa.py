@@ -60,14 +60,14 @@ class SimpleDictionaryAgent(DictionaryAgent):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        if 'shared' in kwargs:
-            self.feature_dict = kwargs['shared'].get(
-                'feature_dict', {'pos': set(),
-                                 'ner': set()})
-        else:
-            if not hasattr(self, 'feature_dict'):
-                self.feature_dict = {'pos': set(), 'ner': set()}
-            # todo, maybe you should add some postprecessing
+        # if 'shared' in kwargs:
+        #     self.feature_dict = kwargs['shared'].get(
+        #         'feature_dict', {'pos': set(),
+        #                          'ner': set()})
+        # else:
+        #     if not hasattr(self, 'feature_dict'):
+        #         self.feature_dict = {'pos': set(), 'ner': set()}
+        #     # todo, maybe you should add some postprecessing
 
             # Index words in embedding file
         if self.opt['pretrained_words'] and self.opt.get('embedding_file'):
@@ -108,59 +108,59 @@ class SimpleDictionaryAgent(DictionaryAgent):
                 self.tok2ind[token] = index
                 self.ind2tok[index] = token
 
-    def load(self, filename):
-        """Load pre-existing dictionary in 'token[<TAB>count]' format.
-        Initialize counts from other dictionary, or 0 if they aren't included.
-        """
-        print('Dictionary: loading existing dictionary from {}'.format(
-              filename))
-        dics = pickle.load(open(filename, 'rb'))
-        self.tok2ind, self.ind2tok, self.feature_dict = dics
-        print('[ num words =  %d ]' % len(self))
+    # def load(self, filename):
+    #     """Load pre-existing dictionary in 'token[<TAB>count]' format.
+    #     Initialize counts from other dictionary, or 0 if they aren't included.
+    #     """
+    #     print('Dictionary: loading existing dictionary from {}'.format(
+    #           filename))
+    #     dics = pickle.load(open(filename, 'rb'))
+    #     self.tok2ind, self.ind2tok, self.feature_dict = dics
+    #     print('[ num words =  %d ]' % len(self))
 
-    def save(self, filename=None, append=False, sort=True):
-        """Save dictionary to file.  Format is 'token<TAB>count' for every
-        token in the dictionary, sorted by count with the most frequent words
-        first.
+    # def save(self, filename=None, append=False, sort=True):
+    #     """Save dictionary to file.  Format is 'token<TAB>count' for every
+    #     token in the dictionary, sorted by count with the most frequent words
+    #     first.
 
-        If ``append`` (default ``False``) is set to ``True``, appends instead
-        of overwriting.
+    #     If ``append`` (default ``False``) is set to ``True``, appends instead
+    #     of overwriting.
 
-        If ``sort`` (default ``True``), then first sort the dictionary before
-        saving.
-        """
-        filename = self.opt['model_file'] if filename is None else filename
-        print('Dictionary: saving dictionary to {}'.format(filename))
-        if sort:
-            self.sort()
-        pickle.dump((self.tok2ind, self.ind2tok, self.feature_dict),
-                    open('filename', 'wb'))
+    #     If ``sort`` (default ``True``), then first sort the dictionary before
+    #     saving.
+    #     """
+    #     filename = self.opt['model_file'] if filename is None else filename
+    #     print('Dictionary: saving dictionary to {}'.format(filename))
+    #     if sort:
+    #         self.sort()
+    #     pickle.dump((self.tok2ind, self.ind2tok, self.feature_dict),
+    #                 open('filename', 'wb'))
 
-    # todo implement load and save ?
-    def add_to_feature(self, features, feature_type):
-        for key in features:
-            if key not in self.feature_dict[feature_type]:
-                self.feature_dict[feature_type].add(key)
+    # # todo implement load and save ?
+    # def add_to_feature(self, features, feature_type):
+    #     for key in features:
+    #         if key not in self.feature_dict[feature_type]:
+    #             self.feature_dict[feature_type].add(key)
 
-    def act(self):
-        """add word to dictionary and add pos and ner to pos and ner dict"""
-        for source in ([self.observation.get('text')],
-                       self.observation.get('labels')):
-            if source:
-                for text in source:
-                    if text:
-                        # self.add_to_dict(self.tokenize(text))
-                        sentence = NLP(text)
-                        self.add_to_dict([t.text for t in sentence])
-                        self.add_to_feature([t.pos_ for t in sentence], 'pos')
-                        self.add_to_feature([t.ent_type_
-                                             for t in sentence], 'ner')
-        return {'id': 'Dictionary'}
+    # def act(self):
+    #     """add word to dictionary and add pos and ner to pos and ner dict"""
+    #     for source in ([self.observation.get('text')],
+    #                    self.observation.get('labels')):
+    #         if source:
+    #             for text in source:
+    #                 if text:
+    #                     # self.add_to_dict(self.tokenize(text))
+    #                     sentence = NLP(text)
+    #                     self.add_to_dict([t.text for t in sentence])
+    #                     self.add_to_feature([t.pos_ for t in sentence], 'pos')
+    #                     self.add_to_feature([t.ent_type_
+    #                                          for t in sentence], 'ner')
+    #     return {'id': 'Dictionary'}
 
-    def shared(self):
-        shared_dict = super().share()
-        shared_dict['feature_dict'] = self.feature_dict
-        return shared_dict
+    # def shared(self):
+    #     shared_dict = super().share()
+    #     shared_dict['feature_dict'] = self.feature_dict
+    #     return shared_dict
 
 
 # ------------------------------------------------------------------------------
@@ -222,8 +222,9 @@ class DrqaAgent(Agent):
         self.n_examples = 0
 
     def _init_from_scratch(self):
-        self.feature_dict = build_feature_dict(self.opt,
-                                               self.word_dict.feature_dict)
+        # self.feature_dict = build_feature_dict(self.opt,
+        #                                        self.word_dict.feature_dict)
+        self.feature_dict = build_feature_dict(self.opt)
         self.opt['num_features'] = len(self.feature_dict)
         self.opt['vocab_size'] = len(self.word_dict)
 

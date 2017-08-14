@@ -11,7 +11,15 @@ import spacy
 
 NLP = spacy.load('en')
 
-
+pos_list = [
+    'DET', 'ADP', 'PART', 'ADJ', 'PUNCT', 'INTJ', 'NOUN', 'ADV', 'X', 'PRON',
+    'PROPN', 'VERB', 'CONJ', 'SPACE', 'NUM', 'SYM', 'CCONJ'
+]
+ner_list = [
+    'QUANTITY', 'PRODUCT', 'EVENT', 'FACILITY', 'NORP', 'TIME', 'LANGUAGE',
+    'ORG', 'DATE', 'CARDINAL', 'PERSON', 'ORDINAL', 'LOC', 'PERCENT', 'MONEY',
+    'WORK_OF_ART', 'GPE', 'FAC', 'LAW', ''
+]
 # ------------------------------------------------------------------------------
 # Data/model utilities.
 # ------------------------------------------------------------------------------
@@ -45,7 +53,7 @@ def load_embeddings(opt, word_dict):
     return embeddings
 
 
-def build_feature_dict(opt, dic_property):
+def build_feature_dict(opt):
     """Make mapping of feature option to feature index."""
     # add manual features to this agent.
     # i know why you initialize DocumentReader with featuredict
@@ -56,11 +64,11 @@ def build_feature_dict(opt, dic_property):
     if opt['use_tf']:
         feature_dict['tf'] = len(feature_dict)
     if opt['use_ner']:
-        for ner_type in dic_property['ner']:
+        for ner_type in ner_list:
             feature_dict['ner=%s' % ner_type] = len(feature_dict)
     if opt['use_pos']:
-        for ner_type in dic_property['pos']:
-            feature_dict['pos=%s' % ner_type] = len(feature_dict)
+        for pos_type in pos_list:
+            feature_dict['pos=%s' % pos_type] = len(feature_dict)
     if opt['use_time'] > 0:
         for i in range(opt['use_time'] - 1):
             feature_dict['time=T%d' % (i + 1)] = len(feature_dict)
@@ -104,7 +112,8 @@ def vectorize(opt, ex, word_dict, feature_dict):
     if opt['use_ner']:
         for i, w in enumerate(ex['document']):
             if spacy_doc[i].ent_type_:
-                features[i][feature_dict['ner=%s' % spacy_doc[i].ent_type_]] = 1.0
+                features[i][feature_dict['ner=%s' % spacy_doc[i]
+                                         .ent_type_]] = 1.0
 
     if opt['use_pos']:
         for i, w in enumerate(ex['document']):
