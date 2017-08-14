@@ -161,8 +161,8 @@ task_list = [
         "id": "TriviaQA",
         "display_name": "TriviaQA",
         "task": "triviaqa",
-        "tags": [ "all",  "QA" ],
-        "description": "Open-domain QA dataset answerable from  Wikipedia and web, constructed by distant supervision, from Mandar Joshi et al. '16. Link: https://arxiv.org/abs/1705.03551"
+        "tags": [ "All",  "QA" ],
+        "description": "Open-domain QA dataset with question-answer-evidence triples, from Joshi et al. '17. Link: https://arxiv.org/abs/1705.03551"
     },
     {
         "id": "Ubuntu",
@@ -225,13 +225,13 @@ task_list = [
         "display_name": "InsuranceQA",
         "task": "insuranceqa",
         "tags": [ "All",  "QA" ],
-        "description": "Task which requires agents to identify high quality answers composed by professionals with deep domain knowledge. Link: https://github.com/shuzi/insuranceQA"
+        "description": "Task which requires agents to identify high quality answers composed by professionals with deep domain knowledge. From Feng et al. '15. Link: https://arxiv.org/abs/1508.01585"
     },
     {
         "id": "MS_MARCO",
         "display_name": "MS_MARCO",
         "task": "ms_marco",
         "tags": [ "All",  "QA" ],
-        "description": "A Reading Comprehension Dataset for the Artificial Intelligence research community. Link: http://www.msmarco.org/dataset.aspx"
+        "description": "A large scale Machine Reading Comprehension Dataset with questions sampled from real anonymized user queries and contexts from web documents. From Nguyen et al. '16. Link: https://arxiv.org/abs/1611.09268"
     }
 ]
