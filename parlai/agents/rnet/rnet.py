@@ -134,7 +134,7 @@ class SimpleDictionaryAgent(DictionaryAgent):
     #     if sort:
     #         self.sort()
     #     pickle.dump((self.tok2ind, self.ind2tok, self.feature_dict),
-    #                 open('filename', 'wb'))
+    #                 open(filename, 'wb'))
 
     # # todo implement load and save ?
     # def add_to_feature(self, features, feature_type):
