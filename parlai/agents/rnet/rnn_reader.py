@@ -7,8 +7,6 @@ import torch
 import torch.nn as nn
 from . import layers
 from .utils import charvob_size
-from torch.autograd import Variable
-import torch.nn.functional as F
 
 
 class RnnDocReader(nn.Module):
@@ -149,19 +147,17 @@ class RnnDocReader(nn.Module):
         # )
 
     def forward(self, x1, x1_f, x1_mask, x1_chars, x1_chars_mask, x2, x2_mask,
-                x2_chars, x2_chars_mask, redoc, reques):
+                x2_chars, x2_chars_mask):
         """Inputs:
         x1 = document word indices                 [ batch * len_d]
         x1_f = document word features indices      [ batch * len_d * nfeat]
         x1_mask = document padding mask            [ batch * len_d]
-        x1_chars = document character indices      [ batch2 * len_d * len_c]
-        x1_chars_mask = document character indices [ batch2 * len_d * len_c]
+        x1_chars = document character indices      [ batch * len_d * len_c]
+        x1_chars_mask = document character indices [ batch * len_d * len_c]
         x2 = question word indices                 [ batch * len_q]
         x2_mask = question padding mask            [ batch * len_q]
-        x2_chars = document character indices      [ batch3 * len_q * len_c]
-        x2_chars_mask = document character indices [ batch3 * len_q * len_c]
-        redoc = rebuild document char encoding     [ batch * len_d]
-        reques = rebuild question char encoding    [ batch * len_q]
+        x2_chars = document character indices      [ batch * len_q * len_c]
+        x2_chars_mask = document character indices [ batch * len_q * len_c]
         """
 
         if len(x1_f.size()) == 1:
@@ -170,12 +166,19 @@ class RnnDocReader(nn.Module):
         else:
             no_manual_feature = False
 
-        batch_size = x1.size(0)
-        doc_length = x1.size(1)
-        question_length = x2.size(1)
+        x1_chars_size = x1_chars.size()
+        x2_chars_size = x2_chars.size()
 
-        x1_chars_emb = self.char_embedding(x1_chars)
-        x2_chars_emb = self.char_embedding(x2_chars)
+        x1_chars_emb = self.char_embedding(
+            x1_chars.view(-1, x1_chars.size(-1)))
+        x2_chars_emb = self.char_embedding(
+            x2_chars.view(-1, x2_chars.size(-1)))
+        x1_chars_mask = x1_chars_mask.view(-1, x1_chars_mask.size(-1))
+        x2_chars_mask = x2_chars_mask.view(-1, x2_chars_mask.size(-1))
+        # emb shape [batch * len_d , len_c, char_emb_dim]
+
+        # todo cache mechanism to cache same word charater-level encoding for
+        # computer just once in batch
 
         # Dropout on character-level embeddings
         if self.opt['dropout_char_emb'] > 0:
@@ -191,50 +194,10 @@ class RnnDocReader(nn.Module):
         # character-level encoding
         doc_char_encoding = self.char_rnn(x1_chars_emb, x1_chars_mask)
         question_char_encoding = self.char_rnn(x2_chars_emb, x2_chars_mask)
-
-        # rebuild document and question char-encoding
-        doc_char_rebuild = Variable(
-            torch.Tensor(batch_size * doc_length, doc_char_encoding.size(-1))
-            .fill_(0))
-        question_char_rebuild = Variable(
-            torch.Tensor(batch_size * question_length,
-                         doc_char_encoding.size(-1)).fill_(0))
-
-        if x1.data.is_cuda:
-            doc_char_rebuild = doc_char_rebuild.cuda()
-            question_char_rebuild = question_char_rebuild.cuda()
-
-        # rebuild doc char encoding
-        redoc = redoc.view(-1)
-        # batch * len_d
-        redoc_order, idx_sort = torch.sort(redoc, dim=0, descending=True)
-        _, idx_unsort = torch.sort(idx_sort, dim=0)
-
-        doc_batch = doc_char_encoding.index_select(
-            0, redoc_order[redoc_order.ne(-1)])
-        doc_batch_pad = doc_batch.unsqueeze(0).unsqueeze(0)
-        doc_batch_pad = F.pad(
-            doc_batch_pad,
-            (0, 0, 0, batch_size * doc_length - doc_batch.size(0))).squeeze()
-        doc_char_rebuild = doc_batch_pad.index_select(0, idx_unsort)
-        doc_char_rebuild = doc_char_rebuild.view(batch_size, doc_length, -1)
-
-        # rebuild ques char encoding
-        reques = reques.view(-1)
-        # batch * len_d
-        reques_order, idx_sort = torch.sort(reques, dim=0, descending=True)
-        _, idx_unsort = torch.sort(idx_sort, dim=0)
-
-        ques_batch = question_char_encoding.index_select(
-            0, reques_order[reques_order.ne(-1)])
-        ques_batch_pad = ques_batch.unsqueeze(0).unsqueeze(0)
-        ques_batch_pad = F.pad(
-            ques_batch_pad,
-            (0, 0, 0,
-             batch_size * question_length - ques_batch.size(0))).squeeze()
-        question_char_rebuild = ques_batch_pad.index_select(0, idx_unsort)
-        question_char_rebuild = question_char_rebuild.view(
-            batch_size, question_length, -1)
+        doc_char_encoding = doc_char_encoding.view(
+            x1_chars_size[:-1] + doc_char_encoding.size()[-1:])
+        question_char_encoding = question_char_encoding.view(
+            x2_chars_size[:-1] + question_char_encoding.size()[-1:])
 
         # Embed both document and question
         x1_emb = self.embedding(x1)
@@ -248,8 +211,8 @@ class RnnDocReader(nn.Module):
                                            training=self.training)
 
         # concatenate word-level and character-level encoding
-        x1_emb = torch.cat([x1_emb, doc_char_rebuild], 2)
-        x2_emb = torch.cat([x2_emb, question_char_rebuild], 2)
+        x1_emb = torch.cat([x1_emb, doc_char_encoding], 2)
+        x2_emb = torch.cat([x2_emb, question_char_encoding], 2)
 
         # Add attention-weighted question representation
         if self.opt['use_qemb']:
