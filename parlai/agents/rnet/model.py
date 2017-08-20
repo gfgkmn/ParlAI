@@ -93,15 +93,16 @@ class DocReaderModel(object):
         # Train mode
         self.network.train()
 
+        tensor_cnt = len(ex) - 4
         # Transfer to GPU
         if self.opt['cuda']:
-            inputs = [Variable(e.cuda(async=True)) for e in ex[:9]]
-            target_s = Variable(ex[9].cuda(async=True))
-            target_e = Variable(ex[10].cuda(async=True))
+            inputs = [Variable(e.cuda(async=True)) for e in ex[:tensor_cnt]]
+            target_s = Variable(ex[tensor_cnt].cuda(async=True))
+            target_e = Variable(ex[tensor_cnt + 1].cuda(async=True))
         else:
-            inputs = [Variable(e) for e in ex[:9]]
-            target_s = Variable(ex[9])
-            target_e = Variable(ex[10])
+            inputs = [Variable(e) for e in ex[:tensor_cnt]]
+            target_s = Variable(ex[tensor_cnt])
+            target_e = Variable(ex[tensor_cnt + 1])
 
         # Run forward
         # score_s, score_e = self.network(*inputs)
@@ -135,13 +136,15 @@ class DocReaderModel(object):
         # Eval mode
         self.network.eval()
 
+        tensor_cnt = len(ex) - 2
         # Transfer to GPU
         if self.opt['cuda']:
             inputs = [
-                Variable(e.cuda(async=True), volatile=True) for e in ex[:9]
+                Variable(e.cuda(async=True), volatile=True)
+                for e in ex[:tensor_cnt]
             ]
         else:
-            inputs = [Variable(e, volatile=True) for e in ex[:9]]
+            inputs = [Variable(e, volatile=True) for e in ex[:tensor_cnt]]
 
         # Run forward
         # score_s, score_e = self.network(*inputs)

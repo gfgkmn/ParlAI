@@ -15,9 +15,17 @@ from torch.autograd import Variable
 
 
 class StackedBRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers,
-                 dropout_rate=0, dropout_output=False, rnn_type=nn.LSTM,
-                 concat_layers=False, padding=False, char_level=False):
+    def __init__(self,
+                 input_size,
+                 hidden_size,
+                 num_layers,
+                 dropout_rate=0,
+                 dropout_output=False,
+                 rnn_type=nn.LSTM,
+                 concat_layers=False,
+                 padding=False,
+                 char_level=False,
+                 birnn=True):
         super(StackedBRNN, self).__init__()
         self.padding = padding
         self.dropout_output = dropout_output
@@ -26,11 +34,12 @@ class StackedBRNN(nn.Module):
         self.concat_layers = concat_layers
         self.rnns = nn.ModuleList()
         self.char_level = char_level
+        self.birnn = birnn
         for i in range(num_layers):
             input_size = input_size if i == 0 else 2 * hidden_size
             self.rnns.append(rnn_type(input_size, hidden_size,
                                       num_layers=1,
-                                      bidirectional=True))
+                                      bidirectional=birnn))
 
     def forward(self, x, x_mask):
         """Can choose to either handle or ignore variable length sequences.
@@ -69,15 +78,21 @@ class StackedBRNN(nn.Module):
             # 2 bidirectional, 174 batch * len_w, 128 char_rnn hidden_size
 
         if isinstance(self.rnns[i], nn.LSTM):
-            output_hiddens = torch.cat(
-                [output_hiddens[-1][0][0], output_hiddens[-1][0][1]], 1)
+            if self.birnn:
+                output_hiddens = torch.cat(
+                    [output_hiddens[-1][0][0], output_hiddens[-1][0][1]], 1)
+            else:
+                output_hiddens = output_hiddens[-1][0][0]
             # index fetch h0
         else:
-            output_hiddens = torch.cat(
-                [output_hiddens[-1][0], output_hiddens[-1][1]], 1)
+            if self.birnn:
+                output_hiddens = torch.cat(
+                    [output_hiddens[-1][0], output_hiddens[-1][1]], 1)
+            else:
+                output_hiddens = output_hiddens[-1][0]
             # for gru or lstm, just one return value
 
-        # Concat hidden layers
+            # Concat hidden layers
         if self.concat_layers:
             output = torch.cat(outputs[1:], 2)
         else:
@@ -149,15 +164,21 @@ class StackedBRNN(nn.Module):
             output_hiddens.append(rnn_last_hidden)
 
         if isinstance(self.rnns[i], nn.LSTM):
-            output_hiddens = torch.cat(
-                [output_hiddens[-1][0][0], output_hiddens[-1][0][1]], 1)
+            if self.birnn:
+                output_hiddens = torch.cat(
+                    [output_hiddens[-1][0][0], output_hiddens[-1][0][1]], 1)
+            else:
+                output_hiddens = output_hiddens[-1][0][0]
             # index fetch h0
         else:
-            output_hiddens = torch.cat(
-                [output_hiddens[-1][0], output_hiddens[-1][1]], 1)
+            if self.birnn:
+                output_hiddens = torch.cat(
+                    [output_hiddens[-1][0], output_hiddens[-1][1]], 1)
+            else:
+                output_hiddens = output_hiddens[-1][0]
             # for gru or lstm, just one return value
 
-        # Unpack everything
+            # Unpack everything
         for i, o in enumerate(outputs[1:], 1):
             outputs[i] = nn.utils.rnn.pad_packed_sequence(o)[0]
 
@@ -188,13 +209,16 @@ class StackedBRNN(nn.Module):
                                    p=self.dropout_rate,
                                    training=self.training)
             if x_mask.size(1) != output.size(1):
-                # cause when use multi-gpu pytorch split a batch into multiple batch 
-                # into different core, but max_len is calculate through a whole batch
-                # so maybe in a gpu core, actural max length is much shorter than max_len
-                # you should concatenate zeros after question_hiddens
+                # cause when use multi-gpu pytorch split a batch into multiple
+                # batch into different core, but max_len is calculate through a
+                # whole batch so maybe in a gpu core, actural max length is
+                # much shorter than max_len you should concatenate zeros after
+                # question_hiddens
                 for_pad = output.unsqueeze(1)
                 # batch * max_len * feature
-                pad_hiddens = F.pad(for_pad, (0, 0, 0, x_mask.size(1) - output.size(1))).squeeze(1)
+                pad_hiddens = F.pad(
+                    for_pad, (0, 0, 0,
+                              x_mask.size(1) - output.size(1))).squeeze(1)
                 output = pad_hiddens
             return output
 
@@ -629,6 +653,36 @@ class PointerNetwork(nn.Module):
                 h = self.rnn_cell(merge_input, h)
 
         return scores[0], scores[1]
+
+
+class FineGrainedGate(nn.Module):
+
+    def __init__(self, word_size, feature_size):
+        super(FineGrainedGate, self).__init__()
+        self.word_size = word_size
+        self.feature_size = feature_size
+        self.trans = nn.Linear(self.feature_size + 1, 1)
+
+    def forward(self, word_emb, char_emb, feature):
+        """
+        word_emb = batch * max_length * emb_dim
+        char_emb = batch * max_length * emb_dim
+        feature = batch * max_length * feature
+        """
+        batch = word_emb.size(0)
+        length = word_emb.size(1)
+        feature = feature.unsqueeze(2).repeat(1, 1, self.word_size, 1)
+        # batch * max_length * 1 * feature
+        word_emb = word_emb.unsqueeze(3)
+        # batch * max_length * emb_dim * 1
+        gate = torch.cat([feature, word_emb], 3).view(-1,
+                                                      self.feature_size + 1)
+        # batch * max_length * emb_dim * feature
+        gate_ratio = F.sigmoid(self.trans(gate)).view(batch, length,
+                                                      self.word_size)
+        # batch * max_length * emb_dim
+        word_emb = word_emb.squeeze(3)
+        return word_emb * gate_ratio + char_emb * (1 - gate_ratio)
 
     # ------------------------------------------------------------------------------
     # Functional
