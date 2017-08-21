@@ -364,104 +364,6 @@ class GatedMatchRNN(nn.Module):
             input_size)
         self.is_bidirectional = is_bidirectional
 
-    # def forward_back(self, x, x_mask, y, y_mask):
-    #     # def forward(self, x, y):
-    #     """Input shapes:
-    #         x = batch * len1 * h
-    #         x_mask = batch * len1
-    #         y = batch * len2 * h
-    #         y_mask = batch * len2
-    #     Output shapes:
-    #         matched_seq = batch * len1 * h
-    #     """
-
-    #     # No padding necessary.
-    #     if x_mask.data.sum() == 0:
-    #         padding = False
-    #     # Pad if we care or if its during eval.
-    #     elif self.padding or not self.training:
-    #         padding = True
-    #     # We don't care.
-    #     else:
-    #         padding = False
-
-    #     h = Variable(torch.rand([1, self.hidden_state_size]))
-    #     # c = self.initial_hidden_state()
-    #     # compute ct for match lstm cell state
-
-    #     # here
-    #     x_proj = self.W_up(x.view(-1, x.size(2))).view(x.size())
-    #     # batch * len1  * h
-    #     y_proj = self.W_q(y.view(-1, y.size(2))).view(y.size())
-    #     # batch * len2 * h
-    #     hidden_proj = self.W_vp(h)
-    #     x_batch = x_proj.unsqueeze(2).repeat(1, 1, y.size(1), 1)
-    #     x_batch_mask = 1 - x_mask.unsqueeze(2)
-
-    #     y_batch = y_proj.unsqueeze(1).repeat(1, x.size(1), 1, 1)
-    #     y_batch_mask = 1 - y_mask.unsqueeze(2)
-
-    #     sum_mask = x_batch_mask.bmm(y_batch_mask.transpose(1, 2))
-    #     # batch*len1*len2, indicate with similarity item is meaningful
-
-    #     h_batch = hidden_proj.unsqueeze(0).unsqueeze(0).repeat(
-    #         x.size(0), x.size(1), y.size(1), 1)
-    #     sum_batch = torch.tanh(x_batch + y_batch + h_batch)
-
-    #     s = self.V(sum_batch.view(-1, sum_batch.size(-1))).view(
-    #         sum_batch.size()[:-1])
-    #     # batch * len1 * len2
-    #     s = torch.mul(s, sum_mask.float())
-
-    #     y_mask = y_mask.unsqueeze(1).expand(s.size())
-    #     s.data.masked_fill_(y_mask.data, -float('inf'))
-
-    #     alpha = F.softmax(s.view(-1, s.size(-1))).view(s.size())
-    #     ct = torch.bmm(alpha, y)
-    #     # batch * len1 * len2 --- batch * len2 * h == batch * len1 * h
-
-    #     merge_input = torch.cat((x, ct), 2)
-
-    #     if self.gated:
-    #         gt = F.sigmoid(
-    #             self.W_g(merge_input.view(-1, merge_input.size(-1))).view(
-    #                 merge_input.size()))
-    #         lstm_input = torch.mul(gt, torch.cat((x, ct), 2))
-    #     else:
-    #         lstm_input = merge_input
-    #     # batch * len1 * 2h
-    #     if padding:
-    #         lengths = x_mask.data.eq(0).sum(1).squeeze()
-    #         _, idx_sort = torch.sort(lengths, dim=0, descending=True)
-    #         _, idx_unsort = torch.sort(idx_sort, dim=0)
-
-    #         lengths = list(lengths[idx_sort])
-    #         idx_sort = Variable(idx_sort)
-    #         idx_unsort = Variable(idx_unsort)
-
-    #         # Sort x
-    #         lstm_input = lstm_input.index_select(0, idx_sort)
-    #         # Transpose batch and sequence dims
-    #         lstm_input = lstm_input.transpose(0, 1)
-
-    #         # Pack it up
-    #         rnn_input = nn.utils.rnn.pack_padded_sequence(
-    #               lstm_input, lengths)
-    #         output, ouput_hidden = self.rnn(rnn_input)
-    #         output = nn.utils.rnn.pad_packed_sequence(output)[0]
-    #         # output = nn.utils.rnn.pad_packed_sequence(output)
-    #         output = output.transpose(0, 1)
-    #         output = output.index_select(0, idx_unsort)
-    #     else:
-    #         lstm_input = lstm_input.transpose(0, 1)
-    #         output, ouput_hidden = self.rnn(lstm_input)
-    #         output = output.transpose(0, 1)
-
-    #     if self.dropout_output and self.dropout_rate > 0:
-    #         output = F.dropout(
-    #             output, p=self.dropout_rate, training=self.training)
-
-    #     return output
 
     def forward(self, x, x_mask, y, y_mask):
         if self.is_bidirectional:
@@ -535,8 +437,6 @@ class GatedMatchRNN(nn.Module):
                 h, c = self.rnn_cell(lstm_input, (h, c))
             else:
                 h = self.rnn_cell(lstm_input, h)
-            h.masked_fill_(x_mask[:, t].unsqueeze(1).expand(h.size()),
-                           float(0))
             hiddens.append(h)
 
         output = torch.stack(hiddens, 1)

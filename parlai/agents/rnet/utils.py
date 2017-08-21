@@ -275,7 +275,7 @@ def batchify(batch, null=0, cuda=False):
     elif len(batch[0]) == NUM_INPUTS + NUM_EXTRA + NUM_TARGETS:
         y_s = torch.cat([ex[NUM_INPUTS] for ex in batch])
         y_e = torch.cat([ex[NUM_INPUTS + 1] for ex in batch])
-        return x1, x1_f, x1_mask, x1_chars, x1_chars_mask, x2, x2_f, x2_mask, \
+        return x1, x1_f, x1_mask, x1_chars, x1_chars_mask, x2, x2_mask, \
             x2_chars, x2_chars_mask, y_s, y_e, text, spans
     # start-position and end position vector
 
