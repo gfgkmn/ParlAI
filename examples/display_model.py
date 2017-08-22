@@ -15,35 +15,9 @@ or:
 from parlai.core.params import ParlaiParser
 from parlai.core.agents import create_agent
 from parlai.core.worlds import create_task
+from parlai.core.utils import translate
 
 import random
-import json
-import requests
-
-translate_token = ""
-
-
-def translate(astr):
-    origin_data = {
-        # "source": str(sys.argv[1]),
-        "source": astr,
-        "trans_type": "en2zh",
-        "request_id": "a11111",
-        "replaced": True,
-        "cached": True
-    }
-    json_data = json.dumps(origin_data)
-
-    return_data = requests.post(
-        'http://api.interpreter.caiyunai.com/v1/translator',
-        data=json_data,
-        headers={
-            "Content-type": "application/json",
-            "X-Authorization": "token %s" % translate_token,
-        })
-
-    # print json.loads(return_data.content)['target']
-    return json.loads(return_data.content)['target']
 
 
 def main():
