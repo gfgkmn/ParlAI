@@ -7,11 +7,22 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-
+import os
+from torch.nn.utils.rnn import pad_packed_sequence as unpack
+from torch.nn.utils.rnn import pack_padded_sequence as pack
+import torch.utils.model_zoo as model_zoo
 
 # ------------------------------------------------------------------------------
 # Modules
 # ------------------------------------------------------------------------------
+
+model_urls = {
+    'wmt-lstm':
+    'https://s3.amazonaws.com/research.metamind.io/cove/wmtlstm-b142a7f2.pth'
+}
+
+model_cache = os.path.join(
+    os.path.dirname(os.path.realpath(__file__)), '.torch')
 
 
 class StackedBRNN(nn.Module):
@@ -37,9 +48,10 @@ class StackedBRNN(nn.Module):
         self.birnn = birnn
         for i in range(num_layers):
             input_size = input_size if i == 0 else 2 * hidden_size
-            self.rnns.append(rnn_type(input_size, hidden_size,
-                                      num_layers=1,
-                                      bidirectional=birnn))
+            self.rnns.append(
+                rnn_type(
+                    input_size, hidden_size, num_layers=1,
+                    bidirectional=birnn))
 
     def forward(self, x, x_mask):
         """Can choose to either handle or ignore variable length sequences.
@@ -67,9 +79,8 @@ class StackedBRNN(nn.Module):
 
             # Apply dropout to hidden input
             if self.dropout_rate > 0:
-                rnn_input = F.dropout(rnn_input,
-                                      p=self.dropout_rate,
-                                      training=self.training)
+                rnn_input = F.dropout(
+                    rnn_input, p=self.dropout_rate, training=self.training)
             # Forward
             rnn_output, rnn_last_hidden = self.rnns[i](rnn_input)
             outputs.append(rnn_output)
@@ -103,9 +114,8 @@ class StackedBRNN(nn.Module):
 
         # Dropout on output layer
         if self.dropout_output and self.dropout_rate > 0:
-            output = F.dropout(output,
-                               p=self.dropout_rate,
-                               training=self.training)
+            output = F.dropout(
+                output, p=self.dropout_rate, training=self.training)
         # todo if just return hidden state, is it necessary ?
         if self.char_level:
             return output_hiddens
@@ -127,9 +137,7 @@ class StackedBRNN(nn.Module):
         if self.char_level:
             batch_size = x_mask.size(0)
             origin_idx_sort = idx_sort
-            zeros_indexs = [
-                i for i, v in enumerate(lengths) if v == 0
-            ]
+            zeros_indexs = [i for i, v in enumerate(lengths) if v == 0]
             if zeros_indexs:
                 first_zero_index = zeros_indexs[0]
             else:
@@ -154,11 +162,12 @@ class StackedBRNN(nn.Module):
 
             # Apply dropout to input
             if self.dropout_rate > 0:
-                dropout_input = F.dropout(rnn_input.data,
-                                          p=self.dropout_rate,
-                                          training=self.training)
-                rnn_input = nn.utils.rnn.PackedSequence(dropout_input,
-                                                        rnn_input.batch_sizes)
+                dropout_input = F.dropout(
+                    rnn_input.data,
+                    p=self.dropout_rate,
+                    training=self.training)
+                rnn_input = nn.utils.rnn.PackedSequence(
+                    dropout_input, rnn_input.batch_sizes)
             rnn_output, rnn_last_hidden = self.rnns[i](rnn_input)
             outputs.append(rnn_output)
             output_hiddens.append(rnn_last_hidden)
@@ -189,8 +198,8 @@ class StackedBRNN(nn.Module):
             output = outputs[-1]
 
         if self.char_level:
-            pad_variable = torch.zeros(
-                    batch_size - first_zero_index, output_hiddens.size(-1))
+            pad_variable = torch.zeros(batch_size - first_zero_index,
+                                       output_hiddens.size(-1))
             if output_hiddens.data.is_cuda:
                 pad_variable = pad_variable.cuda()
 
@@ -205,9 +214,8 @@ class StackedBRNN(nn.Module):
 
             # Dropout on output layer
             if self.dropout_output and self.dropout_rate > 0:
-                output = F.dropout(output,
-                                   p=self.dropout_rate,
-                                   training=self.training)
+                output = F.dropout(
+                    output, p=self.dropout_rate, training=self.training)
             if x_mask.size(1) != output.size(1):
                 # cause when use multi-gpu pytorch split a batch into multiple
                 # batch into different core, but max_len is calculate through a
@@ -228,6 +236,7 @@ class SeqAttnMatch(nn.Module):
     * o_i = sum(alpha_j * y_j) for i in X
     * alpha_j = softmax(y_j * x_i)
     """
+
     def __init__(self, input_size, identity=False):
         super(SeqAttnMatch, self).__init__()
         if not identity:
@@ -275,6 +284,7 @@ class BilinearSeqAttn(nn.Module):
 
     Optionally don't normalize output weights.
     """
+
     def __init__(self, x_size, y_size, identity=False):
         super(BilinearSeqAttn, self).__init__()
         if not identity:
@@ -304,6 +314,7 @@ class LinearSeqAttn(nn.Module):
     """Self attention over a sequence:
     * o_i = softmax(Wx_i) for x_i in X.
     """
+
     def __init__(self, input_size):
         super(LinearSeqAttn, self).__init__()
         self.linear = nn.Linear(input_size, 1)
@@ -359,11 +370,8 @@ class GatedMatchRNN(nn.Module):
         self.W_g = nn.Linear(2 * input_size, 2 * input_size)
         self.gated = gated
         self.rnn_cell_type = rnn_cell_type
-        self.rnn_cell = rnn_cell_type(
-            2 * input_size,
-            input_size)
+        self.rnn_cell = rnn_cell_type(2 * input_size, input_size)
         self.is_bidirectional = is_bidirectional
-
 
     def forward(self, x, x_mask, y, y_mask):
         if self.is_bidirectional:
@@ -461,6 +469,7 @@ class PointerNetwork(nn.Module):
 
     * ha[t] = rnn(ha[t-1], weighted_avg(Hp, a[t]))
     """
+
     def __init__(self,
                  input_size,
                  question_size,
@@ -477,9 +486,7 @@ class PointerNetwork(nn.Module):
         self.V = nn.Linear(input_size, 1)
         self.question_init = question_init
         self.rnn_cell_type = rnn_cell_type
-        self.rnn_cell = rnn_cell_type(
-            input_size,
-            input_size)
+        self.rnn_cell = rnn_cell_type(input_size, input_size)
 
     def forward(self, x, x_mask, y, y_mask):
         """Input shapes:
@@ -556,7 +563,6 @@ class PointerNetwork(nn.Module):
 
 
 class FineGrainedGate(nn.Module):
-
     def __init__(self, word_size, feature_size):
         super(FineGrainedGate, self).__init__()
         self.word_size = word_size
@@ -584,9 +590,39 @@ class FineGrainedGate(nn.Module):
         word_emb = word_emb.squeeze(3)
         return word_emb * gate_ratio + char_emb * (1 - gate_ratio)
 
-    # ------------------------------------------------------------------------------
-    # Functional
-    # ------------------------------------------------------------------------------
+
+class MTLSTM(nn.Module):
+
+    def __init__(self, n_vocab=None, vectors=None, residual_embeddings=False):
+        super(MTLSTM, self).__init__()
+        self.embed = False
+        if n_vocab is not None:
+            self.embed = True
+            self.vectors = nn.Embedding(n_vocab, 300)
+            if vectors is not None:
+                self.vectors.weight.data = vectors
+        self.rnn = nn.LSTM(300, 300, num_layers=2, bidirectional=True)
+        self.rnn.load_state_dict(
+            model_zoo.load_url(model_urls['wmt-lstm'], model_dir=model_cache))
+        self.residual_embeddings = residual_embeddings
+
+    def forward(self, inputs, lengths, hidden=None):
+        if self.embed:
+            inputs = self.vectors(inputs)
+        lens, indices = torch.sort(lengths, 0, True)
+        outputs, hidden_t = self.rnn(
+            pack(inputs[indices], lens.data.tolist(), batch_first=True),
+            hidden)
+        outputs = unpack(outputs, batch_first=True)[0]
+        _, _indices = torch.sort(indices, 0)
+        outputs = outputs[_indices]
+        if self.residual_embeddings:
+            outputs = torch.cat([inputs, outputs], 2)
+        return outputs
+
+# ------------------------------------------------------------------------------
+# Functional
+# ------------------------------------------------------------------------------
 
 
 def uniform_weights(x, x_mask):
@@ -618,8 +654,10 @@ def maskd_reverse(x, x_mask):
         return_ten = return_ten.cuda()
     for i in range(x.size(0)):
         length = x_mask[i].data.eq(0).sum()
-        idx = Variable(torch.LongTensor(
-            list(range(length - 1, -1, -1)) + list(range(length, max_len))))
+        idx = Variable(
+            torch.LongTensor(
+                list(range(length - 1, -1, -1)) +
+                list(range(length, max_len))))
         if x.data.is_cuda:
             idx = idx.cuda()
         return_ten[i] = x[i].index_select(0, idx)
