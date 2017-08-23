@@ -37,7 +37,10 @@ def main():
         for k in range(int(opt['num_examples'])):
             world.parley()
             msgs = world.display()
-            document, question, answer, _ = msgs.split('\n')
+            returns = msgs.split('\n')
+            document = returns[0]
+            question = returns[1]
+            answer = returns[2]
             print(document + '\n')
             print(translate(document) + '\n')
             print(question + '\n')
