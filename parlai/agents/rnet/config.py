@@ -104,12 +104,14 @@ def add_cmdline_args(parser):
                         help='Whether to use ner features')
     agent.add_argument('--use_time', type=int, default=0,
                         help='Time features marking how recent word was said')
+    agent.add_argument('--visualize_attention', type='bool', default=False,
+                        help='Whether to visualize attention when predice')
 
 def set_defaults(opt):
     # Embeddings options
     if opt.get('embedding_file'):
         if not os.path.isfile(opt['embedding_file']):
-            raise IOError('No such file: %s' % args.embedding_file)
+            raise IOError('No such file: %s' % opt['embedding_file'])
         with open(opt['embedding_file']) as f:
             dim = len(f.readline().strip().split(' ')) - 1
         opt['embedding_dim'] = dim
