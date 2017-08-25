@@ -385,6 +385,7 @@ class RnetAgent(Agent):
 
     def report(self):
         if str(self.model.train_loss.avg) == 'nan':
+            os.system('/home/yuhe/Application/bin/sendmail')
             import ipdb
             ipdb.set_trace()
         return (
