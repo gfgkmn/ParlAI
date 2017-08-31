@@ -27,6 +27,7 @@ Either Agent:
 python remote.py -m seq2seq
 """
 
+import torch
 from parlai.agents.remote_agent.remote_agent import RemoteAgentAgent
 from parlai.agents.local_human.local_human import LocalHumanAgent
 from parlai.core.params import ParlaiParser

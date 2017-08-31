@@ -5,3 +5,5 @@ Pillow
 pyzmq
 flask
 flask_cors
+matplotlib
+seaborn

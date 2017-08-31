@@ -47,7 +47,7 @@ if __name__ == '__main__':
     else:
         socket.connect(host)
     app.Debug = True
-    app.run(host='127.0.0.1', port=3377)
+    app.run(host='0.0.0.0', port=3377)
     try:
         socket.send_unicode('<END>', zmq.NOBLOCK)
     except zmq.error.ZMQError:

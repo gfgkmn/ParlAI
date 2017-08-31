@@ -294,7 +294,7 @@
     }
 
     function sendAjax(url, data, handle) {
-	var trueurl = 'http://127.0.0.1:3377' + url;
+	var trueurl = 'http://192.168.1.88:3377' + url;
         $.getJSON(trueurl, data, function(response) {
             handle(response.result);
         });
