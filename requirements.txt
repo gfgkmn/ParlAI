@@ -3,3 +3,5 @@ nltk
 numpy
 Pillow
 pyzmq
+flask
+flask_cors
