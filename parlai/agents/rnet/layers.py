@@ -611,7 +611,7 @@ class MTLSTM(nn.Module):
             inputs = self.vectors(inputs)
         lens, indices = torch.sort(lengths, 0, True)
         outputs, hidden_t = self.rnn(
-            pack(inputs[indices], lens.data.tolist(), batch_first=True),
+            pack(inputs[indices], lens.tolist(), batch_first=True),
             hidden)
         outputs = unpack(outputs, batch_first=True)[0]
         _, _indices = torch.sort(indices, 0)

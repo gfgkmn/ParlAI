@@ -384,6 +384,10 @@ class RnetAgent(Agent):
         # answer should be sub-string in document.
 
     def report(self):
+        if str(self.model.train_loss.avg) == 'nan':
+            os.system('/home/yuhe/Application/bin/sendmail')
+            import ipdb
+            ipdb.set_trace()
         return (
             '[train] updates = %d | train loss = %.2f | exs = %d' %
             (self.model.updates, self.model.train_loss.avg, self.n_examples)
