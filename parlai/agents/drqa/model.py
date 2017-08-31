@@ -6,6 +6,7 @@
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
+import os
 import numpy as np
 import logging
 import math
@@ -161,6 +162,7 @@ class DocReaderModel(object):
                 # visualize question-aware document attention.
                 qticks = ex[-3][i]
                 dticks = ex[-4][i]
+
                 n_plots = math.ceil(len(dticks) / 60.0)
                 fig = plt.figure(figsize=(15, 5 * (n_plots * 3 + 1)))
                 gs = gridspec.GridSpec(n_plots * 3 + 1, 1)
@@ -222,7 +224,11 @@ class DocReaderModel(object):
                 plt.xticks(rotation=85)
 
                 gs.update(wspace=.5, hspace=0.7)
-                plt.show()
+                home_folder = self.opt['parlai_home']
+                target_png_file = os.path.join(home_folder, 'frontend_demo/attention_vis/vis.png')
+                if os.path.exists(target_png_file):
+                    os.remove(target_png_file)
+                fig.savefig(target_png_file, bbox_inches='tight')
                 plt.clf()
 
         return predictions
