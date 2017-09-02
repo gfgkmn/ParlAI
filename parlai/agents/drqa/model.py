@@ -10,6 +10,11 @@ import os
 import numpy as np
 import logging
 import math
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import seaborn as sns
 
 from torch.autograd import Variable
 from .utils import load_embeddings, AverageMeter
@@ -156,9 +161,6 @@ class DocReaderModel(object):
             predictions.append(text[i][s_offset:e_offset])
 
             if self.opt['visualize_attention']:
-                import matplotlib.pyplot as plt
-                import matplotlib.gridspec as gridspec
-                import seaborn as sns
                 # visualize question-aware document attention.
                 qticks = ex[-3][i]
                 dticks = ex[-4][i]
