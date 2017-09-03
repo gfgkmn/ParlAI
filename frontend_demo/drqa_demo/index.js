@@ -173,25 +173,12 @@
 
 
     function translateTriple() {
-        var translatet = document.getElementById("translate_p");
-        translatet.removeChild(document.getElementById('img_t'));
-        translatet.removeChild(document.getElementById('answer_t'));
-        translatet.removeChild(document.getElementById('paragraph_t'));
-        translatet.removeChild(document.getElementById('question_t'));
-
         translateContext($("#paragraph").val(), 'paragraph_t');
-        translateContext($("textarea[name='answer']")[0].value, 'answer_t');
         translateContext($("input[name='question']")[0].value, 'question_t');
+        translateContext($("textarea[name='answer']")[0].value, 'answer_t');
 
-        var curr = document.getElementById("translate_p");
-        // curr.removeChild(document.getElementById('img_t'));
-        var img_t = document.createElement("img");
-        img_t.classList.add("col-md-12");
+        var img_t = document.getElementById("img_t");
         img_t.src = "attention_vis/vis.png?" + new Date().getTime();
-        img_t.alt = "show attention by drqa";
-        img_t.id = "img_t";
-        curr.append(img_t);
-
     }
 
     function translateContext(source_text, target_id) {
@@ -210,15 +197,8 @@
 
                 if (res && res.rc == 0) {
                     var target = res.target;
-                    var curr = document.getElementById("translate_p");
-                    // curr.removeChild(document.getElementById(target_id));
-                    // curr.removeChild(document.getElementById("question_t"));
-                    // curr.removeChild(document.getElementById("answer_t"));
-                    var paragraph_t = document.createElement("p");
-                    paragraph_t.classList.add("col-md-6");
-                    paragraph_t.innerHTML = target;
-                    paragraph_t.id = target_id;
-                    curr.insertBefore(paragraph_t, document.getElementById('img_t'));
+                    var curr = document.getElementById(target_id);
+                    curr.innerHTML = target;
                     console.log(target);
                 }
                 else {
@@ -294,7 +274,7 @@
     }
 
     function sendAjax(url, data, handle) {
-	var trueurl = 'http://192.168.1.88:3377' + url;
+	var trueurl = 'http://127.0.0.1:3377' + url;
         $.getJSON(trueurl, data, function(response) {
             handle(response.result);
         });
