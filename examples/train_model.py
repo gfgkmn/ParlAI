@@ -82,6 +82,8 @@ def run_eval(agent, opt, datatype, max_exs=-1, write_log=False, valid_world=None
 def main():
     # Get command line arguments
     parser = ParlaiParser(True, True)
+    import ipdb
+    ipdb.set_trace()
     train = parser.add_argument_group('Training Loop Arguments')
     train.add_argument('-et', '--evaltask',
                         help=('task to use for valid/test (defaults to the ' +

@@ -165,7 +165,7 @@
     function loadAnswer() {
         document.getElementById("loading").style.display = "block";
         var data = {
-            paragraph: $("#paragraph").val(),
+            // paragraph: $("#paragraph").val(),
             question: $("#question").val()
         };
         sendAjax("/submit", data, handleAnswer);
@@ -173,12 +173,12 @@
 
 
     function translateTriple() {
-        translateContext($("#paragraph").val(), 'paragraph_t');
+        // translateContext($("#paragraph").val(), 'paragraph_t');
         translateContext($("input[name='question']")[0].value, 'question_t');
         translateContext($("textarea[name='answer']")[0].value, 'answer_t');
 
-        var img_t = document.getElementById("img_t");
-        img_t.src = "attention_vis/vis.png?" + new Date().getTime();
+        // var img_t = document.getElementById("img_t");
+        // img_t.src = "attention_vis/vis.png?" + new Date().getTime();
     }
 
     function translateContext(source_text, target_id) {
@@ -260,7 +260,7 @@
     function _loadParagraph() {
         clearField();
         if (paragraph_id == 0) p_id = 1;
-        document.getElementById("paragraph").value = contextss[paragraph_id];
+        // document.getElementById("paragraph").value = contextss[paragraph_id];
         document.getElementById("question").value = context_questions[paragraph_id];
     }
 
@@ -274,7 +274,7 @@
     }
 
     function sendAjax(url, data, handle) {
-	var trueurl = 'http://127.0.0.1:3377' + url;
+	var trueurl = 'http://43.241.232.217:3377' + url;
         $.getJSON(trueurl, data, function(response) {
             handle(response.result);
         });
