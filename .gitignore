@@ -1,5 +1,6 @@
 # MISC
 *.tmp
+.watchmanconfig
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -11,6 +12,7 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+.vector_cache/
 env/
 build/
 data/
@@ -105,3 +107,10 @@ ENV/
 
 # MTurk
 tmp/
+*.pickle
+# Heroku things
+heroku-cli-*
+
+# IntelliJ IDEA
+.idea
+*.iml

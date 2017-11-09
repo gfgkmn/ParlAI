@@ -6,11 +6,9 @@
 """Generates a dictionary file from the training data."""
 
 from parlai.core.dict import DictionaryAgent
-from parlai.core.worlds import DialogPartnerWorld
 from parlai.core.params import ParlaiParser, str2class
 from parlai.core.worlds import create_task
 import copy
-import importlib
 import os
 
 
@@ -39,17 +37,18 @@ def build_dict(opt):
     ordered_opt = copy.deepcopy(opt)
     cnt = 0
     # we use train set to build dictionary
-    ordered_opt['datatype'] = 'train:ordered'
+    ordered_opt['datatype'] = 'train:ordered:stream'
     # DialogTeacher parent class used when initialize.
     ordered_opt['numthreads'] = 1
     ordered_opt['batchsize'] = 1
+    ordered_opt['image_mode'] = 'none'
     world_dict = create_task(ordered_opt, dictionary)
     # when use squad drqa task.
     # DialogPartnerWorld(opt, DefaultTeacher + SimpleDictionaryAgent)
     # world_dict, look like some step between build world
     # environment.
     # pass examples to dictionary
-    for _ in world_dict:
+    while not world_dict.epoch_done():
         cnt += 1
         if cnt > opt['dict_maxexs'] and opt['dict_maxexs'] > 0:
             print('Processed {} exs, moving on.'.format(opt['dict_maxexs']))
@@ -61,7 +60,7 @@ def build_dict(opt):
         # and in agents[0], indicate whether data is already done.
     print('[ dictionary built. ]')
     dictionary.save(opt['dict_file'], sort=True)
-    # print('[ num words =  %d ]' % len(dictionary))
+
 
 
 def main():

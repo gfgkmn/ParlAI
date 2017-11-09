@@ -26,7 +26,6 @@ def main():
 
     # Get command line arguments
     parser = ParlaiParser(True, True)
-    parser.add_argument('-n', '--num-examples', default=1000)
     parser.add_argument('-d', '--display-examples', type='bool', default=False)
     opt = parser.parse_args()
     opt['task'] = 'parlai.agents.local_human.local_human:LocalHumanAgent'
@@ -36,7 +35,7 @@ def main():
     world = create_task(opt, agent)
 
     # Show some example dialogs:
-    for k in range(int(opt['num_examples'])):
+    while True:
         world.parley()
         if opt['display_examples']:
             print("---")
@@ -44,7 +43,6 @@ def main():
         if world.epoch_done():
             print("EPOCH DONE")
             break
-    world.shutdown()
 
 if __name__ == '__main__':
     main()
