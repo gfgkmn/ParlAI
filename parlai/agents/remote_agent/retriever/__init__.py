@@ -12,6 +12,7 @@ from pathlib import PosixPath
 if sys.version_info < (3, 5):
     raise RuntimeError('DrQA supports Python 3.5 or higher.')
 
+os.environ['DRQA_DATA'] = '/data1/yuhe/Coding/DrQA/data/'
 DATA_DIR = (
     os.getenv('DRQA_DATA') or
     os.path.join(PosixPath(__file__).absolute().parents[1].as_posix(), 'data')

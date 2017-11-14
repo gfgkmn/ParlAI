@@ -186,7 +186,8 @@
         // var target_id = 'paragraph_t';
 
         var xhr = createXMLHttpObject();
-        xhr.open('POST', 'https://api.interpreter.caiyunai.com/v1/translator?model=onmt:v2', true);
+        // xhr.open('POST', 'https://api.interpreter.caiyunai.com/v1/translator?model=onmt:v2', true);
+	xhr.open('POST', 'https://api.interpreter.caiyunai.com/v1/translator?model=fairseq:v1', true);
         xhr.setRequestHeader('content-type', 'application/json');
         xhr.setRequestHeader('X-Authorization', 'token j1np9nb4h8jad0mi2odk');
 
@@ -214,7 +215,8 @@
             "trans_type": "en2zh",
             "request_id": "a11111",
             "replaced": true,
-            "cached": true
+            "cached": false,
+	    "model":"fairseq:v1"
         }));
     }
 
