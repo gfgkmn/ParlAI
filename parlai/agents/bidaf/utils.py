@@ -11,15 +11,15 @@ import spacy
 
 NLP = spacy.load('en')
 
-pos_list = [
-    'DET', 'ADP', 'PART', 'ADJ', 'PUNCT', 'INTJ', 'NOUN', 'ADV', 'X', 'PRON',
-    'PROPN', 'VERB', 'CONJ', 'SPACE', 'NUM', 'SYM', 'CCONJ'
-]
-ner_list = [
-    'QUANTITY', 'PRODUCT', 'EVENT', 'FACILITY', 'NORP', 'TIME', 'LANGUAGE',
-    'ORG', 'DATE', 'CARDINAL', 'PERSON', 'ORDINAL', 'LOC', 'PERCENT', 'MONEY',
-    'WORK_OF_ART', 'GPE', 'FAC', 'LAW', ''
-]
+# pos_list = [
+#     'DET', 'ADP', 'PART', 'ADJ', 'PUNCT', 'INTJ', 'NOUN', 'ADV', 'X', 'PRON',
+#     'PROPN', 'VERB', 'CONJ', 'SPACE', 'NUM', 'SYM', 'CCONJ'
+# ]
+# ner_list = [
+#     'QUANTITY', 'PRODUCT', 'EVENT', 'FACILITY', 'NORP', 'TIME', 'LANGUAGE',
+#     'ORG', 'DATE', 'CARDINAL', 'PERSON', 'ORDINAL', 'LOC', 'PERCENT',
+#     'MONEY', 'WORK_OF_ART', 'GPE', 'FAC', 'LAW', ''
+# ]
 # ------------------------------------------------------------------------------
 # Data/model utilities.
 # ------------------------------------------------------------------------------
@@ -61,14 +61,15 @@ def build_feature_dict(opt):
     if opt['use_in_question']:
         feature_dict['in_question'] = len(feature_dict)
         feature_dict['in_question_uncased'] = len(feature_dict)
+        feature_dict['in_question_lemma'] = len(feature_dict)
     if opt['use_tf']:
         feature_dict['tf'] = len(feature_dict)
-    if opt['use_ner']:
-        for ner_type in ner_list:
-            feature_dict['ner=%s' % ner_type] = len(feature_dict)
-    if opt['use_pos']:
-        for pos_type in pos_list:
-            feature_dict['pos=%s' % pos_type] = len(feature_dict)
+    # if opt['use_ner']:
+    #     for ner_type in ner_list:
+    #         feature_dict['ner=%s' % ner_type] = len(feature_dict)
+    # if opt['use_pos']:
+    #     for pos_type in pos_list:
+    #         feature_dict['pos=%s' % pos_type] = len(feature_dict)
     if opt['use_time'] > 0:
         for i in range(opt['use_time'] - 1):
             feature_dict['time=T%d' % (i + 1)] = len(feature_dict)
@@ -81,52 +82,55 @@ def build_feature_dict(opt):
 # ------------------------------------------------------------------------------
 
 
-def vectorize(opt, ex, word_dict, feature_dict):
+def vectorize(opt, ex, dict_misc, feature_dict):
     """Turn tokenized text inputs into feature vectors."""
     # Index words
-    document = torch.LongTensor([word_dict[w] for w in ex['document']])
-    question = torch.LongTensor([word_dict[w] for w in ex['question']])
+    # ex['document'], ex['question']
+    assert type(ex['document']) == spacy.tokens.doc.Doc
+    assert type(ex['question']) == spacy.tokens.doc.Doc
+    document = torch.LongTensor([dict_misc[w.text] for w in ex['document']])
+    question = torch.LongTensor([dict_misc[w.text] for w in ex['question']])
 
     # Create extra features vector
     features = torch.zeros(len(ex['document']), len(feature_dict))
+    poss = torch.LongTensor(
+        [dict_misc.pos2ind[w.pos_] for w in ex['document']])
+    ners = torch.LongTensor(
+        [dict_misc.ner2ind[w.ent_type_] for w in ex['document']])
     # feature matrix, len(docuemnt) * len(feature) shape
-
-    spacy_doc = NLP(' '.join(ex['document']))
 
     # f_{exact_match}
     if opt['use_in_question']:
-        q_words_cased = set([w for w in ex['question']])
-        q_words_uncased = set([w.lower() for w in ex['question']])
+        q_words_cased = set([w.text for w in ex['question']])
+        q_words_uncased = set([w.text.lower() for w in ex['question']])
+        q_words_lemma = set([
+            w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower()
+            for w in ex['question']
+        ])
         for i in range(len(ex['document'])):
-            if ex['document'][i] in q_words_cased:
+            w = ex['document'][i]
+            if w.text in q_words_cased:
                 features[i][feature_dict['in_question']] = 1.0
-            if ex['document'][i].lower() in q_words_uncased:
+            if w.text.lower() in q_words_uncased:
                 features[i][feature_dict['in_question_uncased']] = 1.0
+            if (w.lemma_ if w.lemma_ != '-PRON-' else
+                    w.text.lower()) in q_words_lemma:
+                features[i][feature_dict['in_question_lemma']] = 1.0
 
     # f_{tf}
     if opt['use_tf']:
-        counter = Counter([w.lower() for w in ex['document']])
-        l = len(ex['document'])
+        counter = Counter([d.text.lower() for d in ex['document']])
+        ll = len(ex['document'])
         for i, w in enumerate(ex['document']):
-            features[i][feature_dict['tf']] = counter[w.lower()] * 1.0 / l
-    if opt['use_ner']:
-        for i, w in enumerate(ex['document']):
-            if spacy_doc[i].ent_type_:
-                features[i][feature_dict['ner=%s' % spacy_doc[i]
-                                         .ent_type_]] = 1.0
-
-    if opt['use_pos']:
-        for i, w in enumerate(ex['document']):
-            if spacy_doc[i].pos_:
-                features[i][feature_dict['pos=%s' % spacy_doc[i].pos_]] = 1.0
-
+            features[i][feature_dict['tf']] = counter[
+                w.text.lower()] * 1.0 / ll
     if opt['use_time'] > 0:
         # Counting from the end, each (full-stop terminated) sentence gets
         # its own time identitfier.
         sent_idx = 0
 
         def _full_stop(w):
-            return w in {'.', '?', '!'}
+            return w.text in {'.', '?', '!'}
         for i, w in reversed(list(enumerate(ex['document']))):
             sent_idx = sent_idx + 1 if _full_stop(w) else max(sent_idx, 1)
             if sent_idx < opt['use_time']:
@@ -139,13 +143,16 @@ def vectorize(opt, ex, word_dict, feature_dict):
 
     # Maybe return without target
     if ex['target'] is None:
-        return document, features, question
+        return document, poss, ners, features, question
 
     # ...or with target
+
+    # so in actually we didn't provide labels in squad DefaultTeacher.
+    # this condition didn't satisfy
     start = torch.LongTensor(1).fill_(ex['target'][0])
     end = torch.LongTensor(1).fill_(ex['target'][1])
 
-    return document, features, question, start, end
+    return document, poss, ners, features, question, start, end
 
 
 def batchify(batch, null=0, cuda=False):
@@ -153,19 +160,24 @@ def batchify(batch, null=0, cuda=False):
     Collate inputs into batches.
     generate input matrix and vector for batch.
     """
-    NUM_INPUTS = 3
+    NUM_INPUTS = 5
     NUM_TARGETS = 2
     NUM_EXTRA = 4
 
     # Get elements
+    # provide by vectorize function
     docs = [ex[0] for ex in batch]
     features = [ex[1] for ex in batch]
     questions = [ex[2] for ex in batch]
+    poss = [ex[3] for ex in batch]
+    ners = [ex[4] for ex in batch]
+
+    # provide by bidaf.py _build_ex function
     token_ques = [ex[-3] for ex in batch]
     token_doc = [ex[-4] for ex in batch]
     text = [ex[-2] for ex in batch]
     spans = [ex[-1] for ex in batch]
-    # we couldn't sure ex[3] and ex[4] is exist.
+    # we couldn't sure ex[5] and ex[6] is exist.
 
     # Batch documents and features
     max_length = max([d.size(0) for d in docs])
@@ -174,11 +186,15 @@ def batchify(batch, null=0, cuda=False):
     # (samples, doc_lengths(time_steps))
     x1_mask = torch.ByteTensor(len(docs), max_length).fill_(1)
     x1_f = torch.zeros(len(docs), max_length, features[0].size(1))
+    x1_pos = torch.LongTensor(len(docs), max_length).fill_(null)
+    x1_ner = torch.LongTensor(len(docs), max_length).fill_(null)
     # (samples, doc_lengths(time_steps), features)
     for i, d in enumerate(docs):
         x1[i, :d.size(0)].copy_(d)
         x1_mask[i, :d.size(0)].fill_(0)
         x1_f[i, :d.size(0)].copy_(features[i])
+        x1_pos[i, :d.size(0)].copy_(poss[i])
+        x1_ner[i, :d.size(0)].copy_(ners[i])
     # fill document matrix.
 
     # Batch questions
@@ -196,20 +212,22 @@ def batchify(batch, null=0, cuda=False):
         # looks-like some memory optimize technicle
         x1_f = x1_f.pin_memory()
         x1_mask = x1_mask.pin_memory()
+        x1_pos = x1_pos.pin_memory()
+        x1_ner = x1_ner.pin_memory()
         x2 = x2.pin_memory()
         x2_mask = x2_mask.pin_memory()
 
     # Maybe return without targets
     if len(batch[0]) == NUM_INPUTS + NUM_EXTRA:
-        return x1, x1_f, x1_mask, x2, x2_mask, token_doc, token_ques,\
-            text, spans
+        return x1, x1_f, x1_mask, x1_pos, x1_ner, x2, x2_mask, token_doc, \
+                token_ques, text, spans
 
     # ...Otherwise add targets
     elif len(batch[0]) == NUM_INPUTS + NUM_EXTRA + NUM_TARGETS:
-        y_s = torch.cat([ex[3] for ex in batch])
-        y_e = torch.cat([ex[4] for ex in batch])
-        return x1, x1_f, x1_mask, x2, x2_mask, y_s, y_e, token_doc, \
-            token_ques, text, spans
+        y_s = torch.cat([ex[NUM_INPUTS] for ex in batch])
+        y_e = torch.cat([ex[NUM_INPUTS + 1] for ex in batch])
+        return x1, x1_f, x1_mask, x1_pos, x1_ner, x2, x2_mask, y_s, y_e, \
+            token_doc, token_ques, text, spans
     # start-position and end position vector
 
     # ...Otherwise wrong number of inputs

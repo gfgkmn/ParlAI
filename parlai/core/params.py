@@ -197,7 +197,11 @@ class ParlaiParser(argparse.ArgumentParser):
             for t in ids_to_tasks(task).split(','):
                 agent = get_task_module(t)
                 if hasattr(agent, 'add_cmdline_args'):
+                    # make myself assumption is true
+                    before_comp = self
                     agent.add_cmdline_args(self)
+                    after_comp = self
+                    assert before_comp == after_comp
 
     def add_model_args(self, args=None):
         model_args = self.add_argument_group('ParlAI Model Arguments')

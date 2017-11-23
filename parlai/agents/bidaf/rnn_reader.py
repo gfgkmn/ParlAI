@@ -8,7 +8,9 @@ import torch.nn as nn
 from . import layers
 
 # Modification: add 'pos' and 'ner' features.
-# Origin: https://github.com/facebookresearch/ParlAI/tree/master/parlai/agents/drqa
+# Origin:
+# https://github.com/facebookresearch/ParlAI/tree/master/parlai/agents/drqa
+
 
 class BIDAF(nn.Module):
     def __init__(self, args):
@@ -17,30 +19,32 @@ class BIDAF(nn.Module):
         batch_size, d_hidden = args.batch_size, args.d_hidden
         max_num_sents, max_sent_size = args.max_num_sents, args.max_sent_size
         max_ques_size, max_word_size = args.max_ques_size, args.max_word_size
-        word_vocab_size, char_vocab_size = args.word_vocab_size, args.char_vocab_size
+        word_vocab_size, char_vocab_size = args.word_vocab_size, \
+            args.char_vocab_size
         d_char_embed, d_embed = args.d_char_embed, args.d_embed
         d_char_out = args.d_char_out
 
-        seq_in_size = 4*d_hidden
-        lin_config = [seq_in_size]*2
+        seq_in_size = 4 * d_hidden
+        lin_config = [seq_in_size] * 2
         self.char_embed = L.FixedEmbedding(char_vocab_size, d_char_embed)
         self.word_embed = L.FixedEmbedding(word_vocab_size, d_embed)
         self.h_net = L.HighwayNet(d_embed, args.n_hway_layers)
-        #self.pre_encoder = L.BiEncoder(word_embed_size, args)
-        #self.attend = L.BiAttention(size, args)
-        #self.start_encoder0 = L.BiEncoder(word_embed_size, args)
-        #self.start_encoder1 = L.BiEncoder(word_embed_size, args)
-        #self.end_encoder = L.BiEncoder(word_embed_size, args)
+        # self.pre_encoder = L.BiEncoder(word_embed_size, args)
+        # self.attend = L.BiAttention(size, args)
+        # self.start_encoder0 = L.BiEncoder(word_embed_size, args)
+        # self.start_encoder1 = L.BiEncoder(word_embed_size, args)
+        # self.end_encoder = L.BiEncoder(word_embed_size, args)
         self.lin_start = L.TFLinear(*lin_config, args.answer_func)
         self.lin_end = L.TFLinear(*lin_config, args.answer_func)
 
-        self.enc_start_shape = (batch_size, max_num_sents * max_sent_size, d_hidden * 2)
+        self.enc_start_shape = (batch_size, max_num_sents * max_sent_size,
+                                d_hidden * 2)
         self.logits_reshape = (batch_size, max_num_sents * max_sent_size)
         self.args = args
 
     def forward(self, ctext, text, text_mask, cquery, query, query_mask):
         a = self.args
- 
+
         # Character Embedding Layer
         ctext_embed = self.char_embed(ctext)
         cquery_embed = self.char_embed(cquery)
@@ -70,49 +74,62 @@ class BIDAF(nn.Module):
 
         # p1 = softmax(w^T_{p1}[G;M])
         # Output Layer
-        logits_start = self.lin_start(text_attn_enc_start, text_attn, text_mask)
+        logits_start = self.lin_start(text_attn_enc_start, text_attn,
+                                      text_mask)
         start = L.softmax3d(logits_start, a.max_num_sents, a.max_sent_size)
 
         # softmax of weights from start - not really explained in the paper
-        a1i = L.softsel(text_attn_enc_start.view(self.enc_start_shape),
-                           logits_start.view(self.logits_reshape))\
-                           .unsqueeze(1).unsqueeze(1).repeat(1, a.max_num_sents, a.max_sent_size, 1)
+        a1i = L.softsel(
+                text_attn_enc_start.view(self.enc_start_shape),
+                logits_start.view(self.logits_reshape)
+                ).unsqueeze(1).unsqueeze(1).repeat(
+                        1, a.max_num_sents, a.max_sent_size, 1)
 
-        span = torch.cat((text_attn, text_attn_enc_start, a1i, text_attn_enc_start * a1i), 3)
+        span = torch.cat(
+            (text_attn, text_attn_enc_start, a1i, text_attn_enc_start * a1i),
+            3)
         text_attn_enc_end = self.end_encoder(span)
         logits_end = self.lin_end(text_attn_enc_end, text_attn, text_mask)
         end = L.softmax3d(logits_end, a.max_num_sents, a.max_sent_size)
         return start, end
 
+
 class RnnDocReader(nn.Module):
     """Network for the Document Reader module of DrQA."""
     RNN_TYPES = {'lstm': nn.LSTM, 'gru': nn.GRU, 'rnn': nn.RNN}
 
-    def __init__(self, opt, padding_idx=0, embedding=None):
+    # def __init__(self, opt, padding_idx=0, embedding=None):
+    def __init__(self, opt, dic=None, padding_idx=0):
         super(RnnDocReader, self).__init__()
         # Store config
         self.opt = opt
 
         # Word embeddings
         if opt['pretrained_words']:
-            assert embedding is not None
-            self.embedding = nn.Embedding(embedding.size(0),
-                                          embedding.size(1),
-                                          padding_idx=padding_idx)
-            self.embedding.weight.data = embedding
+            # assert embedding is not None
+            self.embedding = nn.Embedding(
+                opt['vocab_size'],
+                opt['embedding_dim'],
+                padding_idx=padding_idx)
+            # self.embedding.weight.data = embedding
             if opt['fix_embeddings']:
                 assert opt['tune_partial'] == 0
                 for p in self.embedding.parameters():
                     p.requires_grad = False
             elif opt['tune_partial'] > 0:
-                assert opt['tune_partial'] + 2 < embedding.size(0)
-                fixed_embedding = embedding[opt['tune_partial'] + 2:]
-                self.register_buffer('fixed_embedding', fixed_embedding)
-                self.fixed_embedding = fixed_embedding
+                assert opt['tune_partial'] + 2 < opt['vocab_size']
+                # fixed_embedding = embedding[opt['tune_partial'] + 2:]
+                buffer_size = torch.Size(
+                    (opt['vocab_size'] - opt['tune_partial'] - 2,
+                     opt['embedding_dim']))
+                self.register_buffer('fixed_embedding',
+                                     torch.Tensor(buffer_size))
+                # self.fixed_embedding = fixed_embedding
         else:  # random initialized
-            self.embedding = nn.Embedding(opt['vocab_size'],
-                                          opt['embedding_dim'],
-                                          padding_idx=padding_idx)
+            self.embedding = nn.Embedding(
+                opt['vocab_size'],
+                opt['embedding_dim'],
+                padding_idx=padding_idx)
         if opt['pos']:
             self.pos_embedding = nn.Embedding(opt['pos_size'], opt['pos_dim'])
         if opt['ner']:
@@ -163,7 +180,8 @@ class RnnDocReader(nn.Module):
 
         # Question merging
         if opt['question_merge'] not in ['avg', 'self_attn']:
-            raise NotImplementedError('question_merge = %s' % opt['question_merge'])
+            raise NotImplementedError(
+                'question_merge = %s' % opt['question_merge'])
         if opt['question_merge'] == 'self_attn':
             self.self_attn = layers.LinearSeqAttn(question_hidden_size)
 
@@ -193,10 +211,10 @@ class RnnDocReader(nn.Module):
 
         # Dropout on embeddings
         if self.opt['dropout_emb'] > 0:
-            x1_emb = nn.functional.dropout(x1_emb, p=self.opt['dropout_emb'],
-                                           training=self.training)
-            x2_emb = nn.functional.dropout(x2_emb, p=self.opt['dropout_emb'],
-                                           training=self.training)
+            x1_emb = nn.functional.dropout(
+                x1_emb, p=self.opt['dropout_emb'], training=self.training)
+            x2_emb = nn.functional.dropout(
+                x2_emb, p=self.opt['dropout_emb'], training=self.training)
 
         drnn_input_list = [x1_emb, x1_f]
         # Add attention-weighted question representation
@@ -219,7 +237,8 @@ class RnnDocReader(nn.Module):
             q_merge_weights = layers.uniform_weights(question_hiddens, x2_mask)
         elif self.opt['question_merge'] == 'self_attn':
             q_merge_weights = self.self_attn(question_hiddens, x2_mask)
-        question_hidden = layers.weighted_avg(question_hiddens, q_merge_weights)
+        question_hidden = layers.weighted_avg(question_hiddens,
+                                              q_merge_weights)
 
         # Predict start and end positions
         start_scores = self.start_attn(doc_hiddens, question_hidden, x1_mask)

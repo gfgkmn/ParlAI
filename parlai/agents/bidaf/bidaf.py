@@ -30,14 +30,15 @@ try:
     import spacy
 except ModuleNotFoundError:
     raise ModuleNotFoundError(
-        "Please install spacy and spacy 'en' model: go to spacy.io"
-    )
+        "Please install spacy and spacy 'en' model: go to spacy.io")
 
 from parlai.core.agents import Agent
 from parlai.core.dict import DictionaryAgent
 from . import config
 from .utils import build_feature_dict, vectorize, batchify, normalize_text
 from .model import DocReaderModel
+from collections import defaultdict
+import re
 
 # ------------------------------------------------------------------------------
 # Dictionary.
@@ -53,22 +54,34 @@ class SimpleDictionaryAgent(DictionaryAgent):
     def add_cmdline_args(argparser):
         group = DictionaryAgent.add_cmdline_args(argparser)
         group.add_argument(
-            '--pretrained_words', type='bool', default=True,
-            help='Use only words found in provided embedding_file'
-        )
+            '--pretrained_words',
+            type='bool',
+            default=True,
+            help='Use only words found in provided embedding_file')
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # if 'shared' in kwargs:
-        #     self.feature_dict = kwargs['shared'].get(
-        #         'feature_dict', {'pos': set(),
-        #                          'ner': set()})
-        # else:
-        #     if not hasattr(self, 'feature_dict'):
-        #         self.feature_dict = {'pos': set(), 'ner': set()}
-        #     # todo, maybe you should add some postprecessing
-
+        if 'shared' in kwargs:
+            self.feature_dict = kwargs['shared'].get('feature_dict', {
+                'pos': set(),
+                'ner': set()
+            })
+            self.posfreq = kwargs['shareds'].get('posfreq', {})
+            self.nerfreq = kwargs['shareds'].get('nerfreq', {})
+            self.pos2ind = kwargs['shareds'].get('pos2ind', {})
+            self.ind2pos = kwargs['shareds'].get('ind2pos', {})
+            self.ner2ind = kwargs['shareds'].get('ner2ind', {})
+            self.ind2ner = kwargs['shareds'].get('ind2ner', {})
+        else:
+            if not hasattr(self, 'feature_dict'):
+                self.feature_dict = {'pos': set(), 'ner': set()}
+            self.posfreq = defaultdict(int)
+            self.nerfreq = defaultdict(int)
+            self.pos2ind = {}
+            self.ind2pos = {}
+            self.ner2ind = {}
+            self.ind2ner = {}
             # Index words in embedding file
         if self.opt['pretrained_words'] and self.opt.get('embedding_file'):
             print('[ Indexing words with embeddings... ]')
@@ -77,90 +90,115 @@ class SimpleDictionaryAgent(DictionaryAgent):
                 for line in f:
                     w = normalize_text(line.rstrip().split(' ')[0])
                     self.embedding_words.add(w)
-            print('[ Num words in set = %d ]' %
-                  len(self.embedding_words))
+            print('[ Num words in set = %d ]' % len(self.embedding_words))
         else:
             self.embedding_words = None
 
     def tokenize(self, text, **kwargs):
-        tokens = NLP.tokenizer(text)
-        return [t.text for t in tokens]
+        text = self.pre_proc(text)
+        tokens = NLP(text)
+        # return [t.text for t in tokens]
+        return tokens
+
+    def pre_proc(self, text):
+        '''normalize spaces in a string.'''
+        text = re.sub('\s+', ' ', text)
+        return text
 
     def span_tokenize(self, text):
         """
-        self.word_dict.span_tokenize('what if i do')
+        self.dict_misc.span_tokenize('what if i do')
         [(0, 4), (5, 7), (8, 9), (10, 12)]
         """
         tokens = NLP.tokenizer(text)
         return [(t.idx, t.idx + len(t.text)) for t in tokens]
 
+    def load(self, filename):
+        """Load pre-existing dictionary in 'token[<TAB>count]' format.
+        Initialize counts from other dictionary, or 0 if they aren't included.
+        """
+        print(
+            'Dictionary: loading existing dictionary from {}'.format(filename))
+        dics = pickle.load(open(filename, 'rb'))
+        self.tok2ind, self.ind2tok, self.feature_dict = dics
+        print('[ num words =  %d ]' % len(self))
+
+    def save(self, filename=None, append=False, sort=True):
+        """Save dictionary to file.  Format is 'token<TAB>count' for every
+        token in the dictionary, sorted by count with the most frequent words
+        first.
+
+        If ``append`` (default ``False``) is set to ``True``, appends instead
+        of overwriting.
+
+        If ``sort`` (default ``True``), then first sort the dictionary before
+        saving.
+        """
+        filename = self.opt['model_file'] if filename is None else filename
+        print('Dictionary: saving dictionary to {}'.format(filename))
+        if sort:
+            self.sort()
+        pickle.dump((self.tok2ind, self.ind2tok, self.feature_dict),
+                    open(filename, 'wb'))
+
     def add_to_dict(self, tokens):
         """Builds dictionary from the list of provided tokens.
         Only adds words contained in self.embedding_words, if not None.
+        So only take those word in embeddings
         """
         for token in tokens:
-            if (self.embedding_words is not None and
-                    token not in self.embedding_words):
+            if (self.embedding_words is not None
+                    and token not in self.embedding_words):
                 continue
             self.freq[token] += 1
+            # in DictionaryAgent init as defaultdict
             if token not in self.tok2ind:
                 index = len(self.tok2ind)
                 self.tok2ind[token] = index
                 self.ind2tok[index] = token
 
-    # def load(self, filename):
-    #     """Load pre-existing dictionary in 'token[<TAB>count]' format.
-    #     Initialize counts from other dictionary, or 0 if they aren't included.
-    #     """
-    #     print('Dictionary: loading existing dictionary from {}'.format(
-    #           filename))
-    #     dics = pickle.load(open(filename, 'rb'))
-    #     self.tok2ind, self.ind2tok, self.feature_dict = dics
-    #     print('[ num words =  %d ]' % len(self))
+    def add_to_pos(self, features):
+        for key in features:
+            self.posfreq[key] += 1
+            if key not in self.feature_dict['pos']:
+                index = len(self.pos2ind)
+                self.pos2ind[key] = index
+                self.ind2pos[index] = key
+                self.feature_dict['pos'].add(key)
 
-    # def save(self, filename=None, append=False, sort=True):
-    #     """Save dictionary to file.  Format is 'token<TAB>count' for every
-    #     token in the dictionary, sorted by count with the most frequent words
-    #     first.
+    def add_to_ner(self, features):
+        for key in features:
+            self.nerfreq[key] += 1
+            if key not in self.feature_dict['ner']:
+                index = len(self.ner2ind)
+                self.ner2ind[key] = index
+                self.ind2ner[index] = key
+                self.feature_dict['ner'].add(key)
 
-    #     If ``append`` (default ``False``) is set to ``True``, appends instead
-    #     of overwriting.
+    def act(self):
+        """add word to dictionary and add pos and ner to pos and ner dict"""
+        for source in ([self.observation.get('text')],
+                       self.observation.get('labels')):
+            if source:
+                for text in source:
+                    if text:
+                        # self.add_to_dict(self.tokenize(text))
+                        sentence = NLP(text)
+                        self.add_to_dict([t.text for t in sentence])
+                        self.add_to_pos([t.pos_ for t in sentence])
+                        self.add_to_ner([t.ent_type_ for t in sentence])
+        return {'id': 'Dictionary'}
 
-    #     If ``sort`` (default ``True``), then first sort the dictionary before
-    #     saving.
-    #     """
-    #     filename = self.opt['model_file'] if filename is None else filename
-    #     print('Dictionary: saving dictionary to {}'.format(filename))
-    #     if sort:
-    #         self.sort()
-    #     pickle.dump((self.tok2ind, self.ind2tok, self.feature_dict),
-    #                 open(filename, 'wb'))
-
-    # # todo implement load and save ?
-    # def add_to_feature(self, features, feature_type):
-    #     for key in features:
-    #         if key not in self.feature_dict[feature_type]:
-    #             self.feature_dict[feature_type].add(key)
-
-    # def act(self):
-    #     """add word to dictionary and add pos and ner to pos and ner dict"""
-    #     for source in ([self.observation.get('text')],
-    #                    self.observation.get('labels')):
-    #         if source:
-    #             for text in source:
-    #                 if text:
-    #                     # self.add_to_dict(self.tokenize(text))
-    #                     sentence = NLP(text)
-    #                     self.add_to_dict([t.text for t in sentence])
-    #                     self.add_to_feature([t.pos_ for t in sentence], 'pos')
-    #                     self.add_to_feature([t.ent_type_
-    #                                          for t in sentence], 'ner')
-    #     return {'id': 'Dictionary'}
-
-    # def shared(self):
-    #     shared_dict = super().share()
-    #     shared_dict['feature_dict'] = self.feature_dict
-    #     return shared_dict
+    def shared(self):
+        shared_dict = super().share()
+        shared_dict['feature_dict'] = self.feature_dict
+        shared_dict['posfreq'] = self.posfreq
+        shared_dict['nerfreq'] = self.nerfreq
+        shared_dict['pos2ind'] = self.pos2ind
+        shared_dict['ind2pos'] = self.ind2pos
+        shared_dict['ner2ind'] = self.ner2ind
+        shared_dict['ind2ner'] = self.ind2ner
+        return shared_dict
 
 
 # ------------------------------------------------------------------------------
@@ -169,12 +207,12 @@ class SimpleDictionaryAgent(DictionaryAgent):
 
 
 class BidafAgent(Agent):
-
     @staticmethod
     def add_cmdline_args(argparser):
         config.add_cmdline_args(argparser)
         BidafAgent.dictionary_class().add_cmdline_args(argparser)
-        # dictionary_class is SimpleDictionaryAgent so support other diction_class
+        # dictionary_class is SimpleDictionaryAgent so support other
+        # diction_class
         # so every model have three part of config. for task config.
         # for model config, and for data config. so you split it.
         # and then you add these config to argparser.
@@ -184,17 +222,17 @@ class BidafAgent(Agent):
         return SimpleDictionaryAgent
 
     def __init__(self, opt, shared=None):
-        if opt['numthreads'] >1:
+        if opt['numthreads'] > 1:
             raise RuntimeError("numthreads > 1 not supported for this model.")
 
         # Load dict.
         if not shared:
-            word_dict = BidafAgent.dictionary_class()(opt)
+            dict_misc = BidafAgent.dictionary_class()(opt)
         # All agents keep track of the episode (for multiple questions)
         self.episode_done = True
 
         # Only create an empty dummy class when sharing
-        # what this mean ? create dummy class?
+        # used when batchsize > 1 when used in batchworld
         if shared is not None:
             self.is_shared = True
             return
@@ -202,7 +240,7 @@ class BidafAgent(Agent):
         # Set up params/logging/dicts
         self.is_shared = False
         self.id = self.__class__.__name__
-        self.word_dict = word_dict
+        self.dict_misc = dict_misc
         self.opt = copy.deepcopy(opt)
         config.set_defaults(self.opt)
 
@@ -213,7 +251,8 @@ class BidafAgent(Agent):
                 self._init_from_saved(opt['pretrained_model'])
             else:
                 self._init_from_scratch()
-        self.opt['cuda'] = not self.opt['no_cuda'] and torch.cuda.is_available()
+        self.opt[
+            'cuda'] = not self.opt['no_cuda'] and torch.cuda.is_available()
         if self.opt['cuda']:
             print('[ Using CUDA (GPU %d) ]' % opt['gpu'])
             torch.cuda.set_device(opt['gpu'])
@@ -223,27 +262,29 @@ class BidafAgent(Agent):
 
     def _init_from_scratch(self):
         # self.feature_dict = build_feature_dict(self.opt,
-        #                                        self.word_dict.feature_dict)
+        #                                        self.dict_misc.feature_dict)
         self.feature_dict = build_feature_dict(self.opt)
         self.opt['num_features'] = len(self.feature_dict)
-        self.opt['vocab_size'] = len(self.word_dict)
+        self.opt['pos_size'] = len(self.dict_misc.feature_dict['pos'])
+        self.opt['ner_size'] = len(self.dict_misc.feature_dict['ner'])
+        self.opt['vocab_size'] = len(self.dict_misc)
 
         print('[ Initializing model from scratch ]')
-        self.model = DocReaderModel(self.opt, self.word_dict, self.feature_dict)
+        self.model = DocReaderModel(self.opt, self.dict_misc,
+                                    self.feature_dict)
         self.model.set_embeddings()
 
     def _init_from_saved(self, fname):
         print('[ Loading model %s ]' % fname)
-        saved_params = torch.load(fname,
-            map_location=lambda storage, loc: storage
-        )
+        saved_params = torch.load(
+            fname, map_location=lambda storage, loc: storage)
 
         # TODO expand dict and embeddings for new data
-        self.word_dict = saved_params['word_dict']
+        self.dict_misc = saved_params['word_dict']
         self.feature_dict = saved_params['feature_dict']
         self.state_dict = saved_params['state_dict']
         config.override_args(self.opt, saved_params['config'])
-        self.model = DocReaderModel(self.opt, self.word_dict,
+        self.model = DocReaderModel(self.opt, self.dict_misc,
                                     self.feature_dict, self.state_dict)
 
     def observe(self, observation):
@@ -268,8 +309,9 @@ class BidafAgent(Agent):
         if ex is None:
             return reply
         batch = batchify(
-            [ex], null=self.word_dict[self.word_dict.null_token], cuda=self.opt['cuda']
-        )
+            [ex],
+            null=self.dict_misc[self.dict_misc.null_token],
+            cuda=self.opt['cuda'])
 
         # Either train or predict
         if 'labels' in self.observation:
@@ -303,8 +345,9 @@ class BidafAgent(Agent):
 
         # Else, use what we have (hopefully everything).
         batch = batchify(
-            examples, null=self.word_dict[self.word_dict.null_token], cuda=self.opt['cuda']
-        )
+            examples,
+            null=self.dict_misc[self.dict_misc.null_token],
+            cuda=self.opt['cuda'])
 
         # Either train or predict
         if 'labels' in observations[0]:
@@ -335,7 +378,7 @@ class BidafAgent(Agent):
         If a token span cannot be found, return None. Otherwise, torchify.
         """
         # Check if empty input (end of epoch)
-        if not 'text' in ex:
+        if 'text' not in ex:
             return
 
         # Split out document + question
@@ -347,8 +390,10 @@ class BidafAgent(Agent):
             raise RuntimeError('Invalid input. Is task a QA task?')
 
         document, question = ' '.join(fields[:-1]), fields[-1]
-        inputs['document'] = self.word_dict.tokenize(document)
-        inputs['question'] = self.word_dict.tokenize(question)
+        inputs['document'] = self.dict_misc.tokenize(document)
+        # notice in tokenize we use spacy to deal with document, to return a
+        # spacy.token.doc.Doc
+        inputs['question'] = self.dict_misc.tokenize(question)
         inputs['target'] = None
         token_doc = inputs['document']
         token_ques = inputs['question']
@@ -356,30 +401,36 @@ class BidafAgent(Agent):
         # Find targets (if labels provided).
         # Return if we were unable to find an answer.
         if 'labels' in ex:
+            # so in actually we didn't provide labels in squad DefaultTeacher.
+            # this condition didn't satisfy
             inputs['target'] = self._find_target(inputs['document'],
                                                  ex['labels'])
             if inputs['target'] is None:
                 return
 
         # Vectorize.
-        inputs = vectorize(self.opt, inputs, self.word_dict, self.feature_dict)
+        inputs = vectorize(self.opt, inputs, self.dict_misc, self.feature_dict)
         # return document, features, question, start, end all torch.LongTensor
 
         # Return inputs with original text + spans (keep for prediction)
-        return inputs + (token_doc, token_ques, document, self.word_dict.span_tokenize(document))
+        return inputs + (token_doc, token_ques, document,
+                         self.dict_misc.span_tokenize(document))
 
     def _find_target(self, document, labels):
         """Find the start/end token span for all labels in document.
         Return a random one for training.
         """
+
         def _positions(d, l):
             for i in range(len(d)):
                 for j in range(i, min(len(d) - 1, i + len(l))):
-                    if l == d[i:j + 1]:
-                        yield(i, j)
+                    if l.text == d[i:j + 1].text:
+                        yield (i, j)
+
         targets = []
         for label in labels:
-            targets.extend(_positions(document, self.word_dict.tokenize(label)))
+            targets.extend(
+                _positions(document, self.dict_misc.tokenize(label)))
         if len(targets) == 0:
             return
         return targets[np.random.choice(len(targets))]
@@ -387,7 +438,6 @@ class BidafAgent(Agent):
         # answer should be sub-string in document.
 
     def report(self):
-        return (
-            '[train] updates = %d | train loss = %.2f | exs = %d' %
-            (self.model.updates, self.model.train_loss.avg, self.n_examples)
-            )
+        return ('[train] updates = %d | train loss = %.2f | exs = %d' %
+                (self.model.updates, self.model.train_loss.avg,
+                 self.n_examples))

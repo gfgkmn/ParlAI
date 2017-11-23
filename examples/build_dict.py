@@ -25,7 +25,7 @@ def build_dict(opt):
     if opt.get('dict_class'):
         # Custom dictionary class
         dictionary = str2class(opt['dict_class'])(opt)
-        # through ParlaiParser'parameter model == true.
+        # because ParlaiParser'parameter model == true.
         # use self.add_cmdline_args in self.add_model_args
         # to add model's config and data's config through
         # dictionary config.
@@ -60,7 +60,6 @@ def build_dict(opt):
         # and in agents[0], indicate whether data is already done.
     print('[ dictionary built. ]')
     dictionary.save(opt['dict_file'], sort=True)
-
 
 
 def main():

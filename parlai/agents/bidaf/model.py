@@ -10,14 +10,15 @@ import numpy as np
 import logging
 
 from torch.autograd import Variable
-from .utils import AverageMeter
+from .utils import AverageMeter, load_embeddings
 from .rnn_reader import RnnDocReader
 
 # Modification:
 #   - change the logger name
 #   - save & load optimizer state dict
 #   - change the dimension of inputs (for POS and NER features)
-# Origin: https://github.com/facebookresearch/ParlAI/tree/master/parlai/agents/drqa
+# Origin:
+# https://github.com/facebookresearch/ParlAI/tree/master/parlai/agents/drqa
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +28,20 @@ class DocReaderModel(object):
     architecture, saving, updating examples, and predicting examples.
     """
 
-    def __init__(self, opt, embedding=None, state_dict=None):
+    def __init__(self,
+                 opt,
+                 dict_class=None,
+                 feature_dict=None,
+                 state_dict=None):
         # Book-keeping.
         self.opt = opt
-        import ipdb
-        ipdb.set_trace()
+        self.dict_misc = dict_class
         self.updates = state_dict['updates'] if state_dict else 0
         self.train_loss = AverageMeter()
 
         # Building network.
-        self.network = RnnDocReader(opt, embedding=embedding)
+        # self.network = RnnDocReader(opt, embedding=embedding)
+        self.network = RnnDocReader(opt, dic=dict_class)
         if state_dict:
             new_state = set(self.network.state_dict().keys())
             for k in list(state_dict['network'].keys()):
@@ -142,7 +147,7 @@ class DocReaderModel(object):
                            'Keeping random initialization. ]')
             return
         logger.info('[ Loading pre-trained embeddings ]')
-        embeddings = load_embeddings(self.opt, self.word_dict)
+        embeddings = load_embeddings(self.opt, self.dict_misc)
         logger.info('[ Num embeddings = %d ]' % embeddings.size(0))
 
         # Sanity check dimensions
@@ -173,7 +178,8 @@ class DocReaderModel(object):
                 'updates': self.updates
             },
             'config': self.opt,
-            'epoch': epoch
+            'epoch': epoch,
+            'dict_misc': self.dict_misc
         }
         try:
             torch.save(params, filename)
