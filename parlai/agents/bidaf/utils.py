@@ -93,10 +93,14 @@ def vectorize(opt, ex, dict_misc, feature_dict):
 
     # Create extra features vector
     features = torch.zeros(len(ex['document']), len(feature_dict))
-    poss = torch.LongTensor(
-        [dict_misc.pos2ind[w.pos_] for w in ex['document']])
-    ners = torch.LongTensor(
-        [dict_misc.ner2ind[w.ent_type_] for w in ex['document']])
+    try:
+        poss = torch.LongTensor(
+            [dict_misc.pos2ind[w.pos_] for w in ex['document']])
+        ners = torch.LongTensor(
+            [dict_misc.ner2ind[w.ent_type_] for w in ex['document']])
+    except KeyError:
+        import ipdb
+        ipdb.set_trace()
     # feature matrix, len(docuemnt) * len(feature) shape
 
     # f_{exact_match}
@@ -143,7 +147,7 @@ def vectorize(opt, ex, dict_misc, feature_dict):
 
     # Maybe return without target
     if ex['target'] is None:
-        return document, poss, ners, features, question
+        return document, features, question, poss, ners
 
     # ...or with target
 
@@ -152,7 +156,7 @@ def vectorize(opt, ex, dict_misc, feature_dict):
     start = torch.LongTensor(1).fill_(ex['target'][0])
     end = torch.LongTensor(1).fill_(ex['target'][1])
 
-    return document, poss, ners, features, question, start, end
+    return document, features, question, poss, ners, start, end
 
 
 def batchify(batch, null=0, cuda=False):
@@ -219,14 +223,14 @@ def batchify(batch, null=0, cuda=False):
 
     # Maybe return without targets
     if len(batch[0]) == NUM_INPUTS + NUM_EXTRA:
-        return x1, x1_f, x1_mask, x1_pos, x1_ner, x2, x2_mask, token_doc, \
+        return x1, x1_f, x1_pos, x1_ner, x1_mask, x2, x2_mask, token_doc, \
                 token_ques, text, spans
 
     # ...Otherwise add targets
     elif len(batch[0]) == NUM_INPUTS + NUM_EXTRA + NUM_TARGETS:
         y_s = torch.cat([ex[NUM_INPUTS] for ex in batch])
         y_e = torch.cat([ex[NUM_INPUTS + 1] for ex in batch])
-        return x1, x1_f, x1_mask, x1_pos, x1_ner, x2, x2_mask, y_s, y_e, \
+        return x1, x1_f, x1_pos, x1_ner, x1_mask, x2, x2_mask, y_s, y_e, \
             token_doc, token_ques, text, spans
     # start-position and end position vector
 

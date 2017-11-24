@@ -75,13 +75,14 @@ class SimpleDictionaryAgent(DictionaryAgent):
             self.ind2ner = kwargs['shareds'].get('ind2ner', {})
         else:
             if not hasattr(self, 'feature_dict'):
+                # if feature_dict defined, so every variable will be defined.
                 self.feature_dict = {'pos': set(), 'ner': set()}
-            self.posfreq = defaultdict(int)
-            self.nerfreq = defaultdict(int)
-            self.pos2ind = {}
-            self.ind2pos = {}
-            self.ner2ind = {}
-            self.ind2ner = {}
+                self.posfreq = defaultdict(int)
+                self.nerfreq = defaultdict(int)
+                self.pos2ind = {}
+                self.ind2pos = {}
+                self.ner2ind = {}
+                self.ind2ner = {}
             # Index words in embedding file
         if self.opt['pretrained_words'] and self.opt.get('embedding_file'):
             print('[ Indexing words with embeddings... ]')
@@ -120,7 +121,9 @@ class SimpleDictionaryAgent(DictionaryAgent):
         print(
             'Dictionary: loading existing dictionary from {}'.format(filename))
         dics = pickle.load(open(filename, 'rb'))
-        self.tok2ind, self.ind2tok, self.feature_dict = dics
+        self.tok2ind, self.ind2tok, self.feature_dict, \
+            self.posfreq, self.pos2ind, self.ind2pos, \
+            self.nerfreq, self.ner2ind, self.ind2ner = dics
         print('[ num words =  %d ]' % len(self))
 
     def save(self, filename=None, append=False, sort=True):
@@ -138,8 +141,9 @@ class SimpleDictionaryAgent(DictionaryAgent):
         print('Dictionary: saving dictionary to {}'.format(filename))
         if sort:
             self.sort()
-        pickle.dump((self.tok2ind, self.ind2tok, self.feature_dict),
-                    open(filename, 'wb'))
+        pickle.dump((self.tok2ind, self.ind2tok, self.feature_dict,
+                     self.posfreq, self.pos2ind, self.ind2pos, self.nerfreq,
+                     self.ner2ind, self.ind2ner), open(filename, 'wb'))
 
     def add_to_dict(self, tokens):
         """Builds dictionary from the list of provided tokens.

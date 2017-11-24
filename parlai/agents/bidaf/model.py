@@ -170,7 +170,7 @@ class DocReaderModel(object):
                 fixed_embedding = embeddings[self.opt['tune_partial'] + 2:]
                 self.network.fixed_embedding = fixed_embedding
 
-    def save(self, filename, epoch):
+    def save(self, filename):
         params = {
             'state_dict': {
                 'network': self.network.state_dict(),
@@ -178,7 +178,6 @@ class DocReaderModel(object):
                 'updates': self.updates
             },
             'config': self.opt,
-            'epoch': epoch,
             'dict_misc': self.dict_misc
         }
         try:
