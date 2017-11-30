@@ -43,7 +43,7 @@ from .model import DocReaderModel
 # Dictionary.
 # ------------------------------------------------------------------------------
 
-NLP = spacy.load('en')
+NLP = spacy.load('en_core_web_sm')
 
 
 class SimpleDictionaryAgent(DictionaryAgent):

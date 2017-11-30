@@ -9,7 +9,7 @@ import unicodedata
 from collections import Counter
 import spacy
 
-NLP = spacy.load('en')
+NLP = spacy.load('en_core_web_sm')
 
 pos_list = [
     'DET', 'ADP', 'PART', 'ADJ', 'PUNCT', 'INTJ', 'NOUN', 'ADV', 'X', 'PRON',

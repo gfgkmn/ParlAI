@@ -44,7 +44,7 @@ import re
 # Dictionary.
 # ------------------------------------------------------------------------------
 
-NLP = spacy.load('en')
+NLP = spacy.load('en_core_web_sm')
 
 
 class SimpleDictionaryAgent(DictionaryAgent):
@@ -67,18 +67,26 @@ class SimpleDictionaryAgent(DictionaryAgent):
                 'pos': set(),
                 'ner': set()
             })
-            self.posfreq = kwargs['shareds'].get('posfreq', {})
-            self.nerfreq = kwargs['shareds'].get('nerfreq', {})
-            self.pos2ind = kwargs['shareds'].get('pos2ind', {})
-            self.ind2pos = kwargs['shareds'].get('ind2pos', {})
-            self.ner2ind = kwargs['shareds'].get('ner2ind', {})
-            self.ind2ner = kwargs['shareds'].get('ind2ner', {})
+            self.char_dict = kwargs['shared'].get('char_dict', set())
+            self.char2ind = kwargs['shared'].get('char2ind', {})
+            self.ind2char = kwargs['shared'].get('ind2char', {})
+            self.charfreq = kwargs['shared'].get('charfreq', {})
+            self.posfreq = kwargs['shared'].get('posfreq', {})
+            self.nerfreq = kwargs['shared'].get('nerfreq', {})
+            self.pos2ind = kwargs['shared'].get('pos2ind', {})
+            self.ind2pos = kwargs['shared'].get('ind2pos', {})
+            self.ner2ind = kwargs['shared'].get('ner2ind', {})
+            self.ind2ner = kwargs['shared'].get('ind2ner', {})
         else:
             if not hasattr(self, 'feature_dict'):
                 # if feature_dict defined, so every variable will be defined.
                 self.feature_dict = {'pos': set(), 'ner': set()}
+                self.char_dict = set()
                 self.posfreq = defaultdict(int)
                 self.nerfreq = defaultdict(int)
+                self.charfreq = defaultdict(int)
+                self.char2ind = {}
+                self.ind2char = {}
                 self.pos2ind = {}
                 self.ind2pos = {}
                 self.ner2ind = {}
@@ -123,7 +131,8 @@ class SimpleDictionaryAgent(DictionaryAgent):
         dics = pickle.load(open(filename, 'rb'))
         self.tok2ind, self.ind2tok, self.feature_dict, \
             self.posfreq, self.pos2ind, self.ind2pos, \
-            self.nerfreq, self.ner2ind, self.ind2ner = dics
+            self.nerfreq, self.ner2ind, self.ind2ner, self.char_dict,\
+            self.char2ind, self.ind2char, self.charfreq = dics
         print('[ num words =  %d ]' % len(self))
 
     def save(self, filename=None, append=False, sort=True):
@@ -143,7 +152,8 @@ class SimpleDictionaryAgent(DictionaryAgent):
             self.sort()
         pickle.dump((self.tok2ind, self.ind2tok, self.feature_dict,
                      self.posfreq, self.pos2ind, self.ind2pos, self.nerfreq,
-                     self.ner2ind, self.ind2ner), open(filename, 'wb'))
+                     self.ner2ind, self.ind2ner, self.char_dict, self.char2ind,
+                     self.ind2char, self.charfreq), open(filename, 'wb'))
 
     def add_to_dict(self, tokens):
         """Builds dictionary from the list of provided tokens.
@@ -170,6 +180,15 @@ class SimpleDictionaryAgent(DictionaryAgent):
                 self.ind2pos[index] = key
                 self.feature_dict['pos'].add(key)
 
+    def add_to_char(self, chars):
+        for char in chars:
+            self.charfreq[char] += 1
+            # in DictionaryAgent init as defaultdict
+            if char not in self.char2ind:
+                index = len(self.char2ind)
+                self.char2ind[char] = index
+                self.ind2char[index] = char
+
     def add_to_ner(self, features):
         for key in features:
             self.nerfreq[key] += 1
@@ -191,6 +210,7 @@ class SimpleDictionaryAgent(DictionaryAgent):
                         self.add_to_dict([t.text for t in sentence])
                         self.add_to_pos([t.pos_ for t in sentence])
                         self.add_to_ner([t.ent_type_ for t in sentence])
+                        self.add_to_char([i for t in sentence for i in t.text])
         return {'id': 'Dictionary'}
 
     def shared(self):
@@ -202,6 +222,10 @@ class SimpleDictionaryAgent(DictionaryAgent):
         shared_dict['ind2pos'] = self.ind2pos
         shared_dict['ner2ind'] = self.ner2ind
         shared_dict['ind2ner'] = self.ind2ner
+        shared_dict['char_dict'] = self.char_dict
+        shared_dict['charfreq'] = self.charfreq
+        shared_dict['char2ind'] = self.char2ind
+        shared_dict['ind2char'] = self.ind2char
         return shared_dict
 
 
@@ -272,6 +296,7 @@ class BidafAgent(Agent):
         self.opt['pos_size'] = len(self.dict_misc.feature_dict['pos'])
         self.opt['ner_size'] = len(self.dict_misc.feature_dict['ner'])
         self.opt['vocab_size'] = len(self.dict_misc)
+        self.opt['char_size'] = len(self.dict_misc.char2ind)
 
         print('[ Initializing model from scratch ]')
         self.model = DocReaderModel(self.opt, self.dict_misc,

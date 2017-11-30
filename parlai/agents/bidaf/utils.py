@@ -9,7 +9,7 @@ import unicodedata
 from collections import Counter
 import spacy
 
-NLP = spacy.load('en')
+NLP = spacy.load('en_core_web_sm')
 
 # pos_list = [
 #     'DET', 'ADP', 'PART', 'ADJ', 'PUNCT', 'INTJ', 'NOUN', 'ADV', 'X', 'PRON',
@@ -93,14 +93,14 @@ def vectorize(opt, ex, dict_misc, feature_dict):
 
     # Create extra features vector
     features = torch.zeros(len(ex['document']), len(feature_dict))
-    try:
-        poss = torch.LongTensor(
-            [dict_misc.pos2ind[w.pos_] for w in ex['document']])
-        ners = torch.LongTensor(
-            [dict_misc.ner2ind[w.ent_type_] for w in ex['document']])
-    except KeyError:
-        import ipdb
-        ipdb.set_trace()
+    # try:
+    #     poss = torch.LongTensor(
+    #         [dict_misc.pos2ind[w.pos_] for w in ex['document']])
+    #     ners = torch.LongTensor(
+    #         [dict_misc.ner2ind[w.ent_type_] for w in ex['document']])
+    # except KeyError:
+    #     import ipdb
+    #     ipdb.set_trace()
     # feature matrix, len(docuemnt) * len(feature) shape
 
     # f_{exact_match}
@@ -145,9 +145,15 @@ def vectorize(opt, ex, dict_misc, feature_dict):
     # sentence.  so first 8 sentence feature is time>t8 and then time=t7
     # time=t6 etc. and alway is a feature matrix
 
+    char_docs = torch.LongTensor(
+        [[dict_misc.char2ind[c] for c in w.text] for w in ex['document']])
+    char_questions = torch.LongTensor(
+        [[dict_misc.char2ind[c] for c in w.text] for w in ex['question']])
+
     # Maybe return without target
     if ex['target'] is None:
-        return document, features, question, poss, ners
+        # return document, features, question, poss, ners
+        return char_docs, document, char_questions, question
 
     # ...or with target
 
@@ -156,7 +162,8 @@ def vectorize(opt, ex, dict_misc, feature_dict):
     start = torch.LongTensor(1).fill_(ex['target'][0])
     end = torch.LongTensor(1).fill_(ex['target'][1])
 
-    return document, features, question, poss, ners, start, end
+    # return document, features, question, poss, ners, start, end
+    return char_docs, document, char_questions, question, start, end
 
 
 def batchify(batch, null=0, cuda=False):
@@ -164,17 +171,22 @@ def batchify(batch, null=0, cuda=False):
     Collate inputs into batches.
     generate input matrix and vector for batch.
     """
-    NUM_INPUTS = 5
+    # NUM_INPUTS = 5
+    NUM_INPUTS = 4
     NUM_TARGETS = 2
     NUM_EXTRA = 4
 
     # Get elements
     # provide by vectorize function
+    # docs = [ex[0] for ex in batch]
+    # features = [ex[1] for ex in batch]
+    # questions = [ex[2] for ex in batch]
+    # poss = [ex[3] for ex in batch]
+    # ners = [ex[4] for ex in batch]
     docs = [ex[0] for ex in batch]
-    features = [ex[1] for ex in batch]
+    char_docs = [ex[1] for ex in batch]
     questions = [ex[2] for ex in batch]
-    poss = [ex[3] for ex in batch]
-    ners = [ex[4] for ex in batch]
+    char_questions = [ex[3] for ex in batch]
 
     # provide by bidaf.py _build_ex function
     token_ques = [ex[-3] for ex in batch]
@@ -189,17 +201,31 @@ def batchify(batch, null=0, cuda=False):
     x1 = torch.LongTensor(len(docs), max_length).fill_(null)
     # (samples, doc_lengths(time_steps))
     x1_mask = torch.ByteTensor(len(docs), max_length).fill_(1)
-    x1_f = torch.zeros(len(docs), max_length, features[0].size(1))
-    x1_pos = torch.LongTensor(len(docs), max_length).fill_(null)
-    x1_ner = torch.LongTensor(len(docs), max_length).fill_(null)
+    # x1_f = torch.zeros(len(docs), max_length, features[0].size(1))
+    # x1_pos = torch.LongTensor(len(docs), max_length).fill_(null)
+    # x1_ner = torch.LongTensor(len(docs), max_length).fill_(null)
     # (samples, doc_lengths(time_steps), features)
     for i, d in enumerate(docs):
         x1[i, :d.size(0)].copy_(d)
         x1_mask[i, :d.size(0)].fill_(0)
-        x1_f[i, :d.size(0)].copy_(features[i])
-        x1_pos[i, :d.size(0)].copy_(poss[i])
-        x1_ner[i, :d.size(0)].copy_(ners[i])
+        # x1_f[i, :d.size(0)].copy_(features[i])
+        # x1_pos[i, :d.size(0)].copy_(poss[i])
+        # x1_ner[i, :d.size(0)].copy_(ners[i])
     # fill document matrix.
+
+    # Batch char docuemnt
+    max_char_length = max([max([len(w) for w in d]) for d in char_docs])
+    x1_chars = torch.LongTensor(len(docs), max_length,
+                                max_char_length).fill_(null)
+    # (samples, doc_lengths(time_steps))
+    x1_chars_mask = torch.ByteTensor(len(docs), max_length,
+                                     max_char_length).fill_(1)
+    # (samples, doc_lengths(time_steps), features)
+    for i, d in enumerate(char_docs):
+        for j, c in enumerate(d):
+            x1_chars[i, j, :c.size(0)].copy_(c)
+            x1_chars_mask[i, j, :c.size(0)].fill_(0)
+    # fill document_chars matrix.
 
     # Batch questions
     max_length = max([q.size(0) for q in questions])
@@ -210,28 +236,51 @@ def batchify(batch, null=0, cuda=False):
         x2_mask[i, :q.size(0)].fill_(0)
     # fill question matrix.
 
+    # Batch char docuemnt
+    max_char_length = max(
+        [max([len(w) for w in d]) for d in char_questions])
+    x2_chars = torch.LongTensor(len(questions), max_length,
+                                max_char_length).fill_(null)
+    # (samples, doc_lengths(time_steps))
+    x2_chars_mask = torch.ByteTensor(len(questions), max_length,
+                                     max_char_length).fill_(1)
+    # (samples, doc_lengths(time_steps), features)
+    for i, d in enumerate(char_questions):
+        for j, c in enumerate(d):
+            x2_chars[i, j, :c.size(0)].copy_(c)
+            x2_chars_mask[i, j, :c.size(0)].fill_(0)
+    # fill question_chars matrix.
+
     # Pin memory if cuda
     if cuda:
         x1 = x1.pin_memory()
         # looks-like some memory optimize technicle
-        x1_f = x1_f.pin_memory()
+        # x1_f = x1_f.pin_memory()
         x1_mask = x1_mask.pin_memory()
-        x1_pos = x1_pos.pin_memory()
-        x1_ner = x1_ner.pin_memory()
+        x1_chars = x1_chars.pin_memory()
+        x1_chars_mask = x1_chars_mask.pin_memory()
+        # x1_pos = x1_pos.pin_memory()
+        # x1_ner = x1_ner.pin_memory()
         x2 = x2.pin_memory()
         x2_mask = x2_mask.pin_memory()
+        x2_chars = x2_chars.pin_memory()
+        x2_chars_mask.x2_chars_mask.pin_memory()
 
     # Maybe return without targets
     if len(batch[0]) == NUM_INPUTS + NUM_EXTRA:
-        return x1, x1_f, x1_pos, x1_ner, x1_mask, x2, x2_mask, token_doc, \
-                token_ques, text, spans
+        # return x1, x1_f, x1_pos, x1_ner, x1_mask, x2, x2_mask, token_doc, \
+        #         token_ques, text, spans
+        return x1, x1_mask, x1_chars, x2, x2_mask, x2_chars, \
+                token_doc, token_ques, text, spans
 
     # ...Otherwise add targets
     elif len(batch[0]) == NUM_INPUTS + NUM_EXTRA + NUM_TARGETS:
         y_s = torch.cat([ex[NUM_INPUTS] for ex in batch])
         y_e = torch.cat([ex[NUM_INPUTS + 1] for ex in batch])
-        return x1, x1_f, x1_pos, x1_ner, x1_mask, x2, x2_mask, y_s, y_e, \
-            token_doc, token_ques, text, spans
+        # return x1, x1_f, x1_pos, x1_ner, x1_mask, x2, x2_mask, y_s, y_e, \
+        #     token_doc, token_ques, text, spans
+        return x1, x1_mask, x1_chars, x2, x2_mask, x2_chars, \
+            y_s, y_e, token_doc, token_ques, text, spans
     # start-position and end position vector
 
     # ...Otherwise wrong number of inputs
