@@ -1,10 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
 from parlai.core.agents import Agent, create_agent_from_shared
 from parlai.core.dict import DictionaryAgent
+from .retriever import retriever
 import argparse
 import copy
 import numpy as np
@@ -22,13 +20,13 @@ def sanitize(obs):
             obs[k] = list(v)
     return obs
 
-class RemoteAgentAgent(Agent):
+class RetrieveAgentAgent(Agent):
     """Agent which connects over ZMQ to a paired agent. The other agent is
     launched using the command line options set via `add_cmdline_args`."""
 
     @staticmethod
     def add_cmdline_args(argparser):
-        remote = argparser.add_argument_group('Remote Agent Args')
+        remote = argparser.add_argument_group('Retrieve Agent Args')
         remote.add_argument(
             '--port', default=5555,
             help='first port to connect to for remote agents')
@@ -45,6 +43,9 @@ class RemoteAgentAgent(Agent):
         remote.add_argument(
             '--remote-args',
             help='optional arguments to pass to paired agent')
+
+        remote.add_argument('--db_path', type = str )
+        remote.add_argument('--tfidf_path', type = str)
 
     def __init__(self, opt, shared=None):
         """Runs subprocess command to set up remote partner.
@@ -65,7 +66,7 @@ class RemoteAgentAgent(Agent):
             if 'port' in opt:
                 self.port = opt['port']
             else:
-                raise RuntimeError('You need to run RemoteAgent.' +
+                raise RuntimeError('You need to run RetrieveAgentAgent.' +
                                    'add_cmdline_args(argparser) before ' +
                                    'calling this class to set up options.')
             if opt.get('remote_cmd'):
@@ -80,6 +81,12 @@ class RemoteAgentAgent(Agent):
                         args=opt.get('remote_args', '')
                     ).split()
                 )
+
+        print('loading document database...')
+        self.doc_db = retriever.get_class('sqlite')(opt['db_path'])
+        print('Initializing document ranker...')
+        self.ranker = retriever.get_class('tfidf')(opt['tfidf_path'])
+        
         self.connect()
         super().__init__(opt, shared)
 
@@ -94,6 +101,19 @@ class RemoteAgentAgent(Agent):
         else:
             self.socket.connect(host)
         print('python thread connected to ' + host)
+     
+    # def observe(self, observation):
+    #     import ipdb
+    #     ipdb.set_trace()
+    #     observation = copy.copy(observation)
+    #     if not observation['episode_done']:
+    #         query = self.observation['text'] if self.observation is not None else ''
+    #         doc_id, doc_value = self.ranker.closest_docs(observation['text'], k = 1)
+    #         doc_text = self.doc_db.get_doc_text(doc_id)
+    #         observation['text'] = doc_text + '\n' + query
+    #     self.observation = observation
+    #     ipdb.set_trace()
+    #     return observation
 
     def act(self):
         """Send message to paired agent listening over zmq."""
@@ -101,7 +121,15 @@ class RemoteAgentAgent(Agent):
             text = json.dumps(sanitize(self.observation))
             self.socket.send_unicode(text)
         reply = self.socket.recv_unicode()
-        return json.loads(reply)
+
+        reply = json.loads(reply)
+        query = reply['text'].strip() if reply is not None else ''
+        doc_id, doc_value = self.ranker.closest_docs(query, k = 1)
+        if isinstance(doc_id, list):
+            doc_id = doc_id[0]
+        doc_text = self.doc_db.get_doc_text(doc_id)
+        reply['text'] = doc_text + '\n' + query
+        return reply
 
     def share(self):
         """Increments port to use when using remote agents in Hogwild mode."""
@@ -135,7 +163,7 @@ class RemoteAgentAgent(Agent):
                 self.process.kill()
 
 
-class ParsedRemoteAgent(RemoteAgentAgent):
+class ParsedRemoteAgent(RetrieveAgentAgent):
     """Same as the regular remote agent, except that this agent converts all
     text into vectors using its dictionary before sending them.
     """
