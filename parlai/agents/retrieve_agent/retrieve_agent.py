@@ -20,7 +20,7 @@ def sanitize(obs):
             obs[k] = list(v)
     return obs
 
-class RetrieveAgentAgent(Agent):
+class RetrieveAgent(Agent):
     """Agent which connects over ZMQ to a paired agent. The other agent is
     launched using the command line options set via `add_cmdline_args`."""
 
@@ -66,7 +66,7 @@ class RetrieveAgentAgent(Agent):
             if 'port' in opt:
                 self.port = opt['port']
             else:
-                raise RuntimeError('You need to run RetrieveAgentAgent.' +
+                raise RuntimeError('You need to run RetrieveAgent.' +
                                    'add_cmdline_args(argparser) before ' +
                                    'calling this class to set up options.')
             if opt.get('remote_cmd'):
@@ -163,14 +163,14 @@ class RetrieveAgentAgent(Agent):
                 self.process.kill()
 
 
-class ParsedRemoteAgent(RetrieveAgentAgent):
+class ParsedRemoteAgent(RetrieveAgent):
     """Same as the regular remote agent, except that this agent converts all
     text into vectors using its dictionary before sending them.
     """
 
     @staticmethod
     def add_cmdline_args(argparser):
-        RemoteAgentAgent.add_cmdline_args(argparser)
+        RemoteAgent.add_cmdline_args(argparser)
         try:
             ParsedRemoteAgent.dictionary_class().add_cmdline_args(argparser)
         except argparse.ArgumentError:

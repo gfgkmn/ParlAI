@@ -28,7 +28,7 @@ python remote.py -m seq2seq
 """
 
 import torch
-from parlai.agents.remote_agent.remote_agent import RemoteAgentAgent
+from parlai.agents.remote_agent.remote_agent import RemoteAgent
 from parlai.agents.local_human.local_human import LocalHumanAgent
 from parlai.core.params import ParlaiParser
 from parlai.core.agents import create_agent
@@ -41,10 +41,10 @@ def main():
 
     # Get command line arguments
     parser = ParlaiParser(True, True)
-    RemoteAgentAgent.add_cmdline_args(parser)
+    RemoteAgent.add_cmdline_args(parser)
     opt = parser.parse_args()
 
-    remote = RemoteAgentAgent(opt)
+    remote = RemoteAgent(opt)
     if opt.get('task'):
         world = create_task(opt, [remote])
     else:
