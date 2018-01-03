@@ -42,12 +42,17 @@ All worlds are initialized with the following parameters:
 """
 
 import copy
-import math
 import importlib
+import math
 import random
 
-from multiprocessing import Process, Value, Condition, Semaphore
+try:
+    from torch.multiprocessing import Process, Value, Condition, Semaphore
+except ImportError:
+    from multiprocessing import Process, Value, Condition, Semaphore
 from parlai.core.agents import _create_task_agents, create_agents_from_shared
+from parlai.core.metrics import aggregate_metrics, compute_time_metrics
+from parlai.core.utils import Timer
 from parlai.tasks.tasks import ids_to_tasks
 
 
@@ -118,10 +123,16 @@ class World(object):
         else:
             # Add passed in agents to world directly.
             self.agents = agents
+        self.max_exs = None
+        self.total_exs = 0
+        self.total_epochs = 0
+        self.total_parleys = 0
+        self.time = Timer()
 
     def parley(self):
-        """ The main method, that does one step of actions for the agents
-        in the world. This is empty in the base class."""
+        """The main method, that does one step of actions for the agents
+        in the world. This is empty in the base class.
+        """
         pass
 
     def getID(self):
@@ -130,6 +141,7 @@ class World(object):
 
     def display(self):
         """Returns a string describing the current state of the world.
+
         Useful for monitoring and debugging.
         By default, display the messages between the agents."""
         if not hasattr(self, 'acts'):
@@ -137,11 +149,12 @@ class World(object):
         return display_messages(self.acts)
 
     def episode_done(self):
-        """Whether the episode is done or not. """
+        """Whether the episode is done or not."""
         return False
 
     def epoch_done(self):
         """Whether the epoch is done or not.
+
         Not all worlds have the notion of an epoch, but this is useful
         for fixed training, validation or test sets.
         """
@@ -155,8 +168,9 @@ class World(object):
         return shared_data
 
     def _share_agents(self):
-        """ create shared data for agents so other classes can create the same
-        agents without duplicating the data (i.e. sharing parameters)."""
+        """Create shared data for agents so other classes can create the same
+        agents without duplicating the data (i.e. sharing parameters).
+        """
         if not hasattr(self, 'agents'):
             return None
         shared_agents = [a.share() for a in self.agents]
@@ -169,6 +183,18 @@ class World(object):
     def get_acts(self):
         """Return the last act of each agent."""
         return self.acts
+
+    def get_time(self):
+        """Return total training time"""
+        return self.time.time()
+
+    def get_total_exs(self):
+        """Return total amount of examples seen by world."""
+        return self.total_exs
+
+    def get_total_epochs(self):
+        """Return total amount of epochs on which the world has trained."""
+        return self.total_epochs
 
     def __enter__(self):
         """Empty enter provided for use with ``with`` statement.
@@ -189,15 +215,20 @@ class World(object):
         self.shutdown()
         return silent_exit
 
-    def __iter__(self):
-        raise NotImplementedError('Subclass did not implement this.')
+    def num_examples(self):
+        return 0
 
-    def __len__(self):
+    def num_episodes(self):
         return 0
 
     def reset(self):
         for a in self.agents:
             a.reset()
+        self.max_exs = None
+        self.total_exs = 0
+        self.total_epochs = 0
+        self.total_parleys = 0
+        self.time.reset()
 
     def reset_metrics(self):
         for a in self.agents:
@@ -210,18 +241,32 @@ class World(object):
         for a in self.agents:
             a.save()
 
-    def synchronize(self):
-        """Can be used to synchronize processes."""
+    def shutdown(self):
+        """Perform any cleanup, if appropriate."""
         pass
 
-    def shutdown(self):
-        """Performs any cleanup, if appropriate."""
-        pass
+    def update_counters(self):
+        """Update how many epochs have completed"""
+        self.total_parleys += 1
+        if self.max_exs is None:
+            if ('num_epochs' in self.opt and self.opt['num_epochs'] > 0):
+                self.max_exs = self.num_examples() * self.opt['num_epochs'] if self.num_examples() else -1
+            else:
+                self.max_exs = -1
+        # when we know the size of the data
+        if self.max_exs > 0:
+            self.total_epochs = self.total_parleys * self.opt.get('batchsize', 1) / self.num_examples()
+        # when we do not know the size of the data
+        else:
+            if self.epoch_done():
+                self.total_epochs += 1
 
 
 class DialogPartnerWorld(World):
-    """This basic world switches back and forth between two agents, giving each
-    agent one chance to speak per turn and passing that back to the other agent.
+    """Simple world for two agents communicating synchronously.
+
+    This basic world switches back and forth between two agents, giving each
+    agent one chance to speak per turn and passing that back to the other one.
     """
 
     def __init__(self, opt, agents, shared=None):
@@ -231,7 +276,7 @@ class DialogPartnerWorld(World):
             self.agents = create_agents_from_shared(shared['agents'])
         else:
             if len(agents) != 2:
-                raise RuntimeError('There must be exactly two agents for this ' +
+                raise RuntimeError('There must be exactly two agents for this '
                                    'world.')
                 # data generator and model.
             # Add passed in agents directly.
@@ -246,9 +291,10 @@ class DialogPartnerWorld(World):
         agents[1].observe(validate(acts[0]))
         acts[1] = agents[1].act()
         agents[0].observe(validate(acts[1]))
+        self.update_counters()
 
     def episode_done(self):
-        """ Only the first agent indicates when the episode is done."""
+        """Only the first agent indicates when the episode is done."""
         if self.acts[0] is not None:
             return self.acts[0].get('episode_done', False)
         else:
@@ -259,15 +305,20 @@ class DialogPartnerWorld(World):
         return (self.agents[0].epoch_done()
                 if hasattr(self.agents[0], 'epoch_done') else False)
 
-    def report(self):
+    def report(self, compute_time=False):
         if hasattr(self.agents[0], 'report'):
-            return self.agents[0].report()
+            metrics = self.agents[0].report()
+            if compute_time:
+                self.total_exs += metrics['total']
+                time_metrics = compute_time_metrics(self, self.opt['max_train_time'])
+                metrics.update(time_metrics)
+            return metrics
 
-    def __len__(self):
-        return len(self.agents[0])
+    def num_examples(self):
+        return self.agents[0].num_examples()
 
-    def __iter__(self):
-        return iter(self.agents[0])
+    def num_episodes(self):
+        return self.agents[0].num_episodes()
 
     def shutdown(self):
         """Shutdown each agent."""
@@ -301,6 +352,7 @@ class MultiAgentDialogWorld(World):
             for other_agent in self.agents:
                 if other_agent != agent:
                     other_agent.observe(validate(acts[index]))
+        self.update_counters()
 
     def epoch_done(self):
         done = False
@@ -316,8 +368,13 @@ class MultiAgentDialogWorld(World):
                 done = True
         return done
 
-    def report(self):
-        return self.agents[0].report()
+    def report(self, compute_time=False):
+        metrics = self.agents[0].report()
+        if compute_time:
+            self.total_exs += metrics['total']
+            time_metrics = compute_time_metrics(self, self.opt['max_train_time'])
+            metrics.update(time_metrics)
+        return metrics
 
     def shutdown(self):
         """Shutdown each agent."""
@@ -370,6 +427,7 @@ class ExecutableWorld(MultiAgentDialogWorld):
                 obs = self.observe(other_agent, acts[index])
                 if obs is not None:
                     other_agent.observe(obs)
+        self.update_counters()
 
 
 class MultiWorld(World):
@@ -380,6 +438,8 @@ class MultiWorld(World):
     """
 
     def __init__(self, opt, agents=None, shared=None):
+        opt['batch_sort'] = False
+        print('WARNING: batch_sort disabled for multitasking')
         super().__init__(opt)
         self.worlds = []
         for index, k in enumerate(opt['task'].split(',')):
@@ -400,20 +460,23 @@ class MultiWorld(World):
         self.parleys = -1
         self.random = opt.get('datatype', None) == 'train'
 
-    def __iter__(self):
-        return self
+    def num_examples(self):
+        if not hasattr(self, 'num_exs'):
+            worlds_num_exs = [w.num_examples() for w in self.worlds]
+            if any(num is None for num in worlds_num_exs):
+                self.num_exs = None
+            else:
+                self.num_exs = sum(worlds_num_exs)
+        return self.num_exs
 
-    def __next__(self):
-        if self.epoch_done():
-            raise StopIteration()
-
-    def __len__(self):
-        if not hasattr(self, 'len'):
-            self.len = 0
-            # length is sum of all world lengths
-            for _ind, t in enumerate(self.worlds):
-                self.len += len(t)
-        return self.len
+    def num_episodes(self):
+        if not hasattr(self, 'num_eps'):
+            worlds_num_eps = [w.num_episodes() for w in self.worlds]
+            if any(num is None for num in worlds_num_eps):
+                self.num_eps = None
+            else:
+                self.num_eps = sum(worlds_num_eps)
+        return self.num_eps
 
     def get_agents(self):
         return self.worlds[self.world_idx].get_agents()
@@ -455,6 +518,7 @@ class MultiWorld(World):
     def parley(self):
         self.parley_init()
         self.worlds[self.world_idx].parley()
+        self.update_counters()
 
     def display(self):
         if self.world_idx != -1:
@@ -467,28 +531,13 @@ class MultiWorld(World):
         else:
             return ''
 
-    def report(self):
-        # TODO: static method in metrics, "aggregate metrics"
-        m = {}
-        m['tasks'] = {}
-        sum_accuracy = 0
-        num_tasks = 0
-        total = 0
-        for i in range(len(self.worlds)):
-            wid = self.worlds[i].getID()
-            mt = self.worlds[i].report()
-            while wid in m['tasks']:
-                # prevent name cloberring if using multiple tasks with same ID
-                wid += '_'
-            m['tasks'][wid] = mt
-            total += mt['total']
-            if 'accuracy' in mt:
-                sum_accuracy += mt['accuracy']
-                num_tasks += 1
-        if num_tasks > 0:
-            m['accuracy'] = sum_accuracy / num_tasks
-            m['total'] = total
-        return m
+    def report(self, compute_time=False):
+        metrics = aggregate_metrics(self.worlds)
+        if compute_time:
+            self.total_exs += metrics['total']
+            time_metrics = compute_time_metrics(self, self.opt['max_train_time'])
+            metrics.update(time_metrics)
+        return metrics
 
     def reset(self):
         for w in self.worlds:
@@ -523,15 +572,14 @@ def override_opts_in_shared(table, overrides):
 
 
 class BatchWorld(World):
-    """Creates a separate world for each item in the batch, sharing
-    the parameters for each.
-    The underlying world(s) it is batching can be either ``DialogPartnerWorld``,
-    ``MultiAgentWorld``, ``ExecutableWorld`` or ``MultiWorld``.
-    when batchsize > 1 we use batchworld, notice batchworld use other world as building
-    block
-    """
+    """Creates a separate world for each item in the batch, sharing the
+    parameters for each.  The underlying world(s) it is batching can be either
+    ``DialogPartnerWorld``, ``MultiAgentWorld``, ``ExecutableWorld`` or
+    ``MultiWorld``.  when batchsize > 1 we use batchworld, notice batchworld
+    use other world as building block """
 
     def __init__(self, opt, world):
+        super().__init__(opt)
         self.opt = opt
         self.random = opt.get('datatype', None) == 'train'
         self.world = world
@@ -543,22 +591,17 @@ class BatchWorld(World):
             # which is needed for ordered data (esp valid/test sets)
             override_opts_in_shared(shared, {'batchindex': i})
             self.worlds.append(shared['world_class'](opt, None, shared))
-            # use shared to shared almost all data , but agents belong to batchworld.
-            # interestring setting.
-        self.batch_observations = [ None ] * len(self.world.get_agents())
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        if self.epoch_done():
-            raise StopIteration()
+        self.batch_observations = [None] * len(self.world.get_agents())
+        self.first_batch = None
 
     def batch_observe(self, index, batch_actions, index_acting):
         batch_observations = []
         for i, w in enumerate(self.worlds):
             agents = w.get_agents()
             observation = None
+            if batch_actions[i] is None:
+                # shouldn't send None, should send empty observations
+                batch_actions[i] = [{}] * len(self.worlds)
             if hasattr(w, 'observe'):
                 # The world has its own observe function, which the action
                 # first goes through (agents receive messages via the world,
@@ -575,12 +618,11 @@ class BatchWorld(World):
             # but act maybe use class agent to do batch
         return batch_observations
 
-    def batch_act(self, index, batch_observation):
+    def batch_act(self, agent_idx, batch_observation):
         # Given batch observation, do update for agents[index].
         # Call update on agent
-        a = self.world.get_agents()[index]
-        if (batch_observation is not None and len(batch_observation) > 0 and
-                hasattr(a, 'batch_act')):
+        a = self.world.get_agents()[agent_idx]
+        if hasattr(a, 'batch_act') and not (hasattr(a, 'use_batch_act') and not a.use_batch_act):
             # got data samples and len(data_samples) > 0 and model support batch-learn
             batch_actions = a.batch_act(batch_observation)
             # notice this a is class agent so is is_shared = false
@@ -588,15 +630,15 @@ class BatchWorld(World):
             # use class agent do action simultanously
             for i, w in enumerate(self.worlds):
                 acts = w.get_acts()
-                acts[index] = batch_actions[i]
+                acts[agent_idx] = batch_actions[i]
         else:
             # Reverts to running on each individually.
             batch_actions = []
             for w in self.worlds:
                 agents = w.get_agents()
                 acts = w.get_acts()
-                acts[index] = agents[index].act()
-                batch_actions.append(acts[index])
+                acts[agent_idx] = agents[agent_idx].act()
+                batch_actions.append(acts[agent_idx])
         return batch_actions
 
     def parley(self):
@@ -609,18 +651,19 @@ class BatchWorld(World):
             if hasattr(w, 'parley_init'):
                 w.parley_init()
 
-        for index in range(num_agents):
+        for agent_idx in range(num_agents):
             # The agent acts.
-            batch_act = self.batch_act(index, batch_observations[index])
+            batch_act = self.batch_act(agent_idx, batch_observations[agent_idx])
             # We possibly execute this action in the world.
             for i, w in enumerate(self.worlds):
                 if hasattr(w, 'execute'):
                     w.execute(w.agents[i], batch_act[i])
             # All agents (might) observe the results.
             for other_index in range(num_agents):
-                obs = self.batch_observe(other_index, batch_act, index)
+                obs = self.batch_observe(other_index, batch_act, agent_idx)
                 if obs is not None:
                     batch_observations[other_index] = obs
+        self.update_counters()
 
     def display(self):
         s = ("[--batchsize " + str(len(self.worlds)) + "--]\n")
@@ -630,8 +673,11 @@ class BatchWorld(World):
         s += ("[--end of batch--]")
         return s
 
-    def __len__(self):
-        return math.ceil(sum(len(w) for w in self.worlds) / len(self.worlds))
+    def num_examples(self):
+        return self.world.num_examples()
+
+    def num_episodes(self):
+        return self.world.num_episodes()
 
     def getID(self):
         return self.world.getID()
@@ -640,15 +686,20 @@ class BatchWorld(World):
         return False
 
     def epoch_done(self):
+        # first check parent world: if it says it's done, we're done
+        if self.world.epoch_done():
+            return True
+        # otherwise check if all shared worlds are done
         for world in self.worlds:
             if not world.epoch_done():
                 return False
         return True
 
-    def report(self):
-        return self.world.report()
+    def report(self, compute_time=False):
+        return self.world.report(compute_time)
 
     def reset(self):
+        self.world.reset()
         for w in self.worlds:
             w.reset()
 
@@ -672,36 +723,46 @@ class HogwildProcess(Process):
     Each ``HogwildProcess`` contain its own unique ``World``.
     """
 
-    def __init__(self, tid, world, opt, agents, sem, fin, term, cnt):
-        self.threadId = tid
-        self.world_type = world
+
+    def __init__(self, tid, opt, world, sync):
+        opt = copy.deepcopy(opt)
+        opt['numthreads'] = 1
         self.opt = opt
-        self.agent_shares = [a.share() for a in agents]
-        self.queued_items = sem
-        self.epochDone = fin
-        self.terminate = term
-        self.cnt = cnt
-        super().__init__()
+        self.shared = world.share()
+        self.shared['threadindex'] = tid
+        if 'agents' in self.shared:
+            for a in self.shared['agents']:
+                a['threadindex'] = tid
+        self.sync = sync
+        super().__init__(daemon=True)
 
     def run(self):
         """Runs normal parley loop for as many examples as this thread can get
-        ahold of via the semaphore ``queued_items``.
+        ahold of via the semaphore ``queued_sem``.
         """
-        shared_agents = create_agents_from_shared(self.agent_shares)
-        world = self.world_type(self.opt, shared_agents)
-
+        world = self.shared['world_class'](self.opt, None, self.shared)
+        if self.opt.get('batchsize', 1) > 1:
+            world = BatchWorld(self.opt, world)
+        self.sync['threads_sem'].release()
         with world:
             while True:
-                self.queued_items.acquire()
-                if self.terminate.value:
+                if self.sync['term_flag'].value:
                     break  # time to close
-                world.parley()
-                with self.cnt.get_lock():
-                    self.cnt.value -= 1
-                    if self.cnt.value == 0:
-                        # let main thread know that all the examples are finished
-                        with self.epochDone:
-                            self.epochDone.notify_all()
+                self.sync['queued_sem'].acquire()
+                self.sync['threads_sem'].release()
+                if not world.epoch_done() or self.opt.get('datatype').startswith('train', False):
+                    # do one example if any available
+                    world.parley()
+                    with self.sync['total_parleys'].get_lock():
+                        self.sync['total_parleys'].value += 1
+                else:
+                    with self.sync['epoch_done_ctr'].get_lock():
+                        # increment the number of finished threads
+                        self.sync['epoch_done_ctr'].value += 1
+                    self.sync['threads_sem'].release()  # send control back to main thread
+                    self.sync['queued_sem'].release()  # we didn't process anything
+                    self.sync['reset_sem'].acquire()
+                    world.reset()
 
 
 class HogwildWorld(World):
@@ -723,66 +784,111 @@ class HogwildWorld(World):
       once the processing is complete).
     """
 
-    def __init__(self, world_class, opt, agents):
-        self.inner_world = world_class(opt, agents)
 
-        self.queued_items = Semaphore(0)  # counts num exs to be processed
-        self.epochDone = Condition()  # notifies when exs are finished
-        self.terminate = Value('b', False)  # tells threads when to shut down
-        self.cnt = Value('i', 0)  # number of exs that remain to be processed
+    def __init__(self, opt, world):
+        super().__init__(opt)
+        self.inner_world = world
+        self.numthreads = opt['numthreads']
 
+        self.sync = {  # syncronization primitives
+            # semaphores for counting queued examples
+            'queued_sem': Semaphore(0),  # counts num exs to be processed
+            'threads_sem': Semaphore(0),  # counts threads
+            'reset_sem': Semaphore(0),  # allows threads to reset
+
+            # flags for communicating with threads
+            'reset_flag': Value('b', False),  # threads should reset
+            'term_flag': Value('b', False),  # threads should terminate
+
+            # counters
+            'epoch_done_ctr': Value('i', 0),  # number of done threads
+            'total_parleys': Value('l', 0),  # number of parleys in threads
+        }
+
+        # don't let threads create more threads!
         self.threads = []
-        for i in range(opt['numthreads']):
-            self.threads.append(HogwildProcess(i, world_class, opt,
-                                               agents, self.queued_items,
-                                               self.epochDone, self.terminate,
-                                               self.cnt))
+        for i in range(self.numthreads):
+            self.threads.append(HogwildProcess(i, opt, world, self.sync))
         for t in self.threads:
             t.start()
 
-    def __iter__(self):
-        raise NotImplementedError('Iteration not available in hogwild.')
+        for _ in self.threads:
+            self.sync['threads_sem'].acquire()
+
 
     def display(self):
+        return ''
         self.shutdown()
-        raise NotImplementedError('Hogwild does not support displaying in-run' +
+        raise NotImplementedError('Hogwild does not support displaying in-run'
                                   ' task data. Use `--numthreads 1`.')
 
     def episode_done(self):
-        return False
+        self.shutdown()
+        raise RuntimeError('episode_done() undefined for hogwild')
+
+    def epoch_done(self):
+        return self.sync['epoch_done_ctr'].value == self.numthreads
 
     def parley(self):
         """Queue one item to be processed."""
-        with self.cnt.get_lock():
-            self.cnt.value += 1
-        self.queued_items.release()
+        # schedule an example
+        self.sync['queued_sem'].release()
+        # keep main process from getting too far ahead of the threads
+        # this way it can only queue up to numthreads unprocessed examples
+        self.sync['threads_sem'].acquire()
+        self.update_counters()
 
     def getID(self):
         return self.inner_world.getID()
 
-    def report(self):
-        return self.inner_world.report()
+    def num_examples(self):
+        return self.inner_world.num_examples()
+
+    def num_episodes(self):
+        return self.inner_world.num_episodes()
+
+    def get_total_epochs(self):
+        """Return total amount of epochs on which the world has trained."""
+        if self.max_exs is None:
+            if ('num_epochs' in self.opt and self.opt['num_epochs'] > 0):
+                self.max_exs = self.num_examples() * self.opt['num_epochs'] if self.num_examples() else -1
+            else:
+                self.max_exs = -1
+        if self.max_exs > 0:
+            return self.sync['total_parleys'].value * self.opt.get('batchsize', 1) / self.num_examples()
+        else:
+            return self.total_epochs
+
+    def report(self, compute_time=False):
+        return self.inner_world.report(compute_time)
 
     def save_agents(self):
         self.inner_world.save_agents()
 
-    def synchronize(self):
-        """Sync barrier: will wait until all queued examples are processed."""
-        with self.epochDone:
-            self.epochDone.wait_for(lambda: self.cnt.value == 0)
+    def reset(self):
+        # set epoch done counter to 0
+        with self.sync['epoch_done_ctr'].get_lock():
+            self.sync['epoch_done_ctr'].value = 0
+        # release reset semaphore
+        for _ in self.threads:
+            self.sync['reset_sem'].release()
+
+    def reset_metrics(self):
+        self.inner_world.reset_metrics()
 
     def shutdown(self):
-        """Set shutdown flag and wake threads up to close themselves"""
+        """Set shutdown flag and wake threads up to close themselves."""
         # set shutdown flag
-        with self.terminate.get_lock():
-            self.terminate.value = True
-        # wake up each thread by queueing fake examples
+        with self.sync['term_flag'].get_lock():
+            self.sync['term_flag'].value = True
+        # wake up each thread by queueing fake examples or setting reset flag
         for _ in self.threads:
-            self.queued_items.release()
+            self.sync['queued_sem'].release()
+            self.sync['reset_sem'].release()
         # wait for threads to close
         for t in self.threads:
             t.join()
-
+        self.inner_world.shutdown()
 
 
 ### Functions for creating tasks/worlds given options.
@@ -802,9 +908,9 @@ def _get_task_world(opt):
         try:
             my_module = importlib.import_module(module_name)
             world_class = getattr(my_module, world_name)
+        except Exception:
             # so in your task, you also should implement world.py
             # if you task have special world.
-        except:
             # Defaults to this if you did not specify a world for your task.
             world_class = DialogPartnerWorld
     task_agents = _create_task_agents(opt)
@@ -847,35 +953,21 @@ def create_task(opt, user_agents):
     opt['task'] = ids_to_tasks(opt['task'])
     print('[creating task(s): ' + opt['task'] + ']')
 
-    # after build_dict this time we have DrqaAgent as user_agents
-
-    # Single threaded or hogwild task creation (the latter creates multiple threads).
-    # Check datatype for train, because we need to do single-threaded for
-    # valid and test in order to guarantee exactly one epoch of training.
-    # If batchsize > 1, default to BatchWorld, as numthreads can be used for
-    # multithreading in batch mode, e.g. multithreaded data loading
-    if opt.get('numthreads', 1) == 1 or 'train' not in opt['datatype'] or opt.get('batchsize', 1) > 1:
-        if ',' not in opt['task']:
-            # Single task
-            world = create_task_world(opt, user_agents)
-            # so we have data, we should create world environment.
-            # and according to multi task and single task.
-            # use MultiWorld, or create_task_world
-        else:
-            # Multitask teacher/agent
-            world = MultiWorld(opt, user_agents)
-
-        if opt.get('batchsize', 1) > 1:
-            return BatchWorld(opt, world)
-        else:
-            return world
+    # check if single or multithreaded, and single-example or batched examples
+    if ',' not in opt['task']:
+        # Single task
+        world = create_task_world(opt, user_agents)
     else:
-        # more than one thread requested: do hogwild training
-        if ',' not in opt['task']:
-            # Single task
-            # TODO(ahm): fix metrics for multiteacher hogwild training
-            world_class, task_agents = _get_task_world(opt)
-            return HogwildWorld(world_class, opt, task_agents + user_agents)
-        else:
-            # TODO(ahm): fix this
-            raise NotImplementedError('hogwild multiworld not supported yet')
+        # Multitask teacher/agent
+        # TODO: remove and replace with multiteachers only?
+        world = MultiWorld(opt, user_agents)
+
+    if opt.get('numthreads', 1) > 1:
+        # use hogwild world if more than one thread requested
+        # hogwild world will create sub batch worlds as well if bsz > 1
+        world = HogwildWorld(opt, world)
+    elif opt.get('batchsize', 1) > 1:
+        # otherwise check if should use batchworld
+        world = BatchWorld(opt, world)
+
+    return world

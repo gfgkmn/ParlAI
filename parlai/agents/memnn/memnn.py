@@ -115,7 +115,7 @@ class MemnnAgent(Agent):
 
     def observe(self, observation):
         observation = copy.copy(observation)
-        if not self.episode_done:
+        if not self.episode_done and not observation.get('preprocessed', False):
             # if the last example wasn't the end of an episode, then we need to
             # recall what was said in that example
             prev_dialogue = self.observation['text'] if self.observation is not None else ''
@@ -129,9 +129,15 @@ class MemnnAgent(Agent):
         return observation
 
     def predict(self, xs, cands, ys=None):
-        # Subsample to reduce training time
-        cands = [list(set(random.sample(c, min(32, len(c))) + self.labels)) for c in cands]
         is_training = ys is not None
+        if is_training:
+            # Subsample to reduce training time
+            cands = [list(set(random.sample(c, min(32, len(c))) + self.labels))
+                     for c in cands]
+        else:
+            # rank all cands to increase accuracy
+            cands = [list(set(c)) for c in cands]
+
         self.model.train(mode=is_training)
         # Organize inputs for network (see contents of xs and ys in batchify method)
         inputs = [Variable(x, volatile=is_training) for x in xs]
@@ -173,10 +179,11 @@ class MemnnAgent(Agent):
                 if self.opt['cuda']:
                     candidate_embeddings = candidate_embeddings.cuda()
                 last_cand = cand_list
-            scores[i, :len(cand_list)] = self.model.score.one_to_many(output_embeddings[i].unsqueeze(0), candidate_embeddings)
+            scores[i, :len(cand_list)] = self.model.score.one_to_many(output_embeddings[i].unsqueeze(0), candidate_embeddings).squeeze()
         return scores
 
     def ranked_predictions(self, cands, scores):
+        # return [' '] * len(self.answers)
         _, inds = scores.data.sort(descending=True, dim=1)
         return [[cands[i][j] for j in r if j < len(cands[i])]
                     for i, r in enumerate(inds)]

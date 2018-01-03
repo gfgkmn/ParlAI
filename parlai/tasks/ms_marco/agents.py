@@ -7,8 +7,7 @@ import copy
 import json
 import os
 
-from parlai.core.dialog_teacher import DialogTeacher
-from parlai.core.fbdialog_teacher import FbDialogTeacher
+from parlai.core.teachers import DialogTeacher, FbDialogTeacher
 from .build import build
 
 
@@ -46,7 +45,7 @@ class DefaultTeacher(DialogTeacher):
                 d_example = json.loads(jline)
                 context = [d['passage_text'] for d in d_example['passages']]
                 question = d_example['query']
-                if self.datatype != 'test':
+                if not self.datatype.startswith('test'):
                     answers = d_example['answers']
                     if not answers:
                         answers = ['NULL']  # empty list of answers will cause exception

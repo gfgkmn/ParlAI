@@ -6,12 +6,12 @@ ParlAI (pronounced “par-lay”) is a framework for dialog AI research, impleme
 
 Its goal is to provide researchers:
 - a unified framework for sharing, training and testing dialog models
-- multi-task training over many datasets at once
+- many popular datasets available all in one place, with the ability to multi-task over them
 - seamless integration of [Amazon Mechanical Turk](https://www.mturk.com/mturk/welcome) for data collection and human evaluation
 
 Over 20 [tasks](https://github.com/facebookresearch/ParlAI/blob/master/parlai/tasks/task_list.py) are currently supported, including popular datasets such as [SQuAD](https://rajpurkar.github.io/SQuAD-explorer/), [bAbI tasks](https://arxiv.org/abs/1502.05698), [MS MARCO](http://www.msmarco.org/), [MCTest](https://www.microsoft.com/en-us/research/publication/mctest-challenge-dataset-open-domain-machine-comprehension-text/), [WikiQA](https://www.microsoft.com/en-us/download/details.aspx?id=52419), [WebQuestions](http://www.aclweb.org/anthology/D13-1160), [SimpleQuestions](https://arxiv.org/abs/1506.02075), [WikiMovies](https://arxiv.org/abs/1606.03126), [QACNN & QADailyMail](https://arxiv.org/abs/1506.03340), [CBT](https://arxiv.org/abs/1511.02301), [BookTest](https://arxiv.org/abs/1610.00956), [bAbI Dialog tasks](https://arxiv.org/abs/1605.07683), [Ubuntu Dialog](https://arxiv.org/abs/1506.08909), [OpenSubtitles](http://opus.lingfil.uu.se/OpenSubtitles.php), [Cornell Movie](https://www.cs.cornell.edu/~cristian/Cornell_Movie-Dialogs_Corpus.html), [VQA-COCO2014](http://visualqa.org/), [VisDial](https://arxiv.org/abs/1611.08669) and [CLEVR](http://cs.stanford.edu/people/jcjohns/clevr/). See [here](http://www.parl.ai/static/docs/tasks.html#) for the current complete task list.
 
-Included are examples of training neural models with [PyTorch](http://pytorch.org/) and [Lua Torch](http://torch.ch/), with batch training on GPU or hogwild training on CPUs. Using [Theano](http://deeplearning.net/software/theano/) or [Tensorflow](https://www.tensorflow.org/) instead is also straightforward.
+Included are examples of training neural models with [PyTorch](http://pytorch.org/) and [Lua Torch](http://torch.ch/), with batch training on GPU or hogwild training on CPUs. Using [Tensorflow](https://www.tensorflow.org/) instead is also straightforward.
 
 Our aim is for the number of tasks and agents that train on them to grow in a community-based way.
 
@@ -21,8 +21,6 @@ ParlAI is described in the following paper:
 
 We are in an early-release Beta. Expect some adventures and rough edges.<br>
 See the [news page](https://github.com/facebookresearch/ParlAI/blob/master/NEWS.md) for the latest additions & updates, and the website [http://parl.ai](http://parl.ai) for further docs.
-
-Please also note there is a [ParlAI Request For Proposals funding university teams, 7 awards are available - deadline Aug 25.](https://research.fb.com/programs/research-awards/proposals/parlai/)
 
 ## Goals
 
@@ -86,9 +84,9 @@ Display the predictions of that same IR baseline model:
 python examples/display_model.py -m ir_baseline -t "#moviedd-reddit" -dt valid
 ```
 
-Train a seq2seq model on the "1k training examples" bAbI task 1 with batch size of 8 examples for one epoch (requires pytorch):
+Train a seq2seq model on the "10k training examples" bAbI task 1 with batch size of 32 examples until accuracy reaches 95% on validation (requires pytorch):
 ```bash
-python examples/train_model.py -m seq2seq -t babi:task1k:1 -bs 8 -e 1 -mf /tmp/model_s2s
+python examples/train_model.py -t babi:task10k:1 -m seq2seq -mf /tmp/model_s2s -bs 32 -vtim 30 -vcut 0.95
 ```
 
 Trains an attentive LSTM model on the SQuAD dataset with a batch size of 32 examples (pytorch and regex):
@@ -194,12 +192,14 @@ The core library contains the following files:
   - **_MultiTaskTeacher_**: creates a set of teachers based on a "task string" passed to the Teacher, creating multiple teachers within it and alternating between them
   - create_task_teacher: instantiate a teacher from a given task string (e.g. 'babi:task:1' or 'squad')
 - **build_data.py**: basic utilities for setting up data for tasks. you can override if your filesystem needs different functionality.
-- **dialog_teacher.py**: contains a base teacher class for doing dialog with fixed chat logs, along with a data class for storing the data
 - **dict.py**: contains code for building general NLP-style dictionaries from observations
   - DictionaryAgent: agent which tracks the index and frequency of words in a dictionary, and can parse a sentence into indices into its dictionary or back
-- **fbdialog_teacher.py**: contains a teacher class which implements a function setup_data which parses data in the FB Dialog data format
 - **metrics.py**: computes evaluation metrics for dialog, e.g. ranking metrics, etc.
 - **params.py**: uses argparse to interpret command line arguments for ParlAI
+- **teachers.py**: contains teachers that deal with dialog-based tasks, as well as data classes for storing data
+  - **_FixedDialogTeacher_**: base class for a teacher that utilizes fixed data
+  - **_DialogTeacher_**: base class for a teacher doing dialog with fixed chat logs
+  - **_FbDialogTeacher_**: a teacher that implements a function `setup_data` that parses data in the FB Dialog data format
 - **thread_utils.py**: utility classes/functions for use in Hogwild multithreading (multiprocessing)
   - SharedTable: provides a lock-protected, shared-memory, dictionary-like interface for keeping track of metrics
 - **worlds.py**: contains a set of basic worlds for tasks to take place inside
@@ -298,9 +298,9 @@ Please see [the MTurk tutorial](http://parl.ai/static/docs/mturk.html) to learn 
 If you have any questions, bug reports or feature requests, please don't hesitate to post on our [Github Issues page](https://github.com/facebookresearch/ParlAI/issues).
 
 ## The Team
-ParlAI is currently maintained by Alexander H. Miller, Jack Urbanek and Jason Weston.
+ParlAI is currently maintained by Emily Dinan, Alexander H. Miller, Kurt Shuster, Jack Urbanek and Jason Weston.
 A non-exhaustive list of other major contributors includes:
-Will Feng, Adam Fisch,  Jiasen Lu, Antoine Bordes, Devi Parikh, Dhruv Batra,
+Will Feng, Adam Fisch, Jiasen Lu, Antoine Bordes, Devi Parikh, Dhruv Batra,
 Filipe de Avila Belbute Peres and Chao Pan.
 
 ## Citation

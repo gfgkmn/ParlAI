@@ -193,6 +193,13 @@ task_list = [
         "description": "Open-domain QA dataset with question-answer-evidence triples, from Joshi et al. '17. Link: https://arxiv.org/abs/1705.03551"
     },
     {
+        "id": "TaskNTalk",
+        "display_name": "Task N' Talk",
+        "task": "taskntalk",
+        "tags": [ "All",  "Goal" ],
+        "description": "Dataset of synthetic shapes described by attributes, for agents to play a cooperative QA game, from Kottur et al. '17. Link: https://arxiv.org/abs/1706.08502"
+    },
+    {
         "id": "Ubuntu",
         "display_name": "Ubuntu",
         "task": "ubuntu",
@@ -270,6 +277,13 @@ task_list = [
         "description": "A visual reasoning dataset that tests abilities such as attribute identification, counting, comparison, spatial relationships, and logical operations. From Johnson et al. '16. Link: https://arxiv.org/abs/1612.06890"
     },
     {
+        "id": "nlvr",
+        "display_name": "nlvr",
+        "task": "nlvr",
+        "tags": [ "All",  "Visual" ],
+        "description": "Cornell Natural Language Visual Reasoning (NLVR) is a language grounding dataset based on  pairs of natural language statements grounded in synthetic images. From Suhr et al. '17. Link: http://lic.nlp.cornell.edu/nlvr/"
+    },
+    {
         "id": "WMT",
         "display_name": "WMT",
         "task": "wmt",
@@ -277,10 +291,31 @@ task_list = [
         "description": "Workshop on Machine Translation task, currently only includes en_de."
     },
     {
+        "id": "IWSLT14",
+        "display_name": "IWSLT14",
+        "task": "iwslt14",
+        "tags": ["All", "MT"],
+        "description": "2014 International Workshop on Spoken Language task, currently only includes en_de and de_en. From Cettolo et al. '12. Link: wit3.fbk.eu"
+    },
+    {
         "id": "ConvAI_ChitChat",
         "display_name": "ConvAI_ChitChat",
         "task": "convai_chitchat",
         "tags": [ "All", "ChitChat" ],
         "description": "Human-bot dialogues containing free discussions of randomly chosen paragraphs from SQuAD. Link to dataset: http://convai.io/data/"
+    },
+    {
+        "id": "Dialogue_QE",
+        "display_name": "Dialogue_QE",
+        "task": "dialogue_qe",
+        "tags": [ "All" ],
+        "description": "Human-bot dialogues labelled for quality at the level of dialogues. Can be used to train dialogue-level metric for dialogue systems. Link to dataset: http://convai.io/data/"
+    },
+    {
+        "id": "SCAN",
+        "display_name": "SCAN",
+        "task": "scan",
+        "tags": [ "Goal", "All" ],
+        "description": "SCAN is a set of simple language-driven navigation tasks for studying compositional learning and zero-shot generalization. The SCAN tasks were inspired by the CommAI environment, which is the origin of the acronym (Simplified versions of the CommAI Navigation tasks). See the paper: https://arxiv.org/abs/1711.00350 or data: https://github.com/brendenlake/SCAN"
     }
 ]

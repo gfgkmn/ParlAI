@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree. An additional grant
 # of patent rights can be found in the PATENTS file in the same directory.
 
-from parlai.core.fbdialog_teacher import FbDialogTeacher
+from parlai.core.teachers import FbDialogTeacher
 from .build import build
 
 import copy
@@ -23,7 +23,8 @@ class DefaultTeacher(FbDialogTeacher):
     def __init__(self, opt, shared=None):
         opt = copy.deepcopy(opt)
         opt['datafile'] = _path(opt, '')
-        opt['cands_datafile'] = opt['datafile']
+        if not opt['datatype'].startswith('train'):
+            opt['cands_datafile'] = opt['datafile']
         super().__init__(opt, shared)
 
     def setup_data(self, path):

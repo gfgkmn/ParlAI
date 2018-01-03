@@ -4,7 +4,6 @@
 # LICENSE file in the root directory of this source tree. An additional grant
 # of patent rights can be found in the PATENTS file in the same directory.
 import torch
-import time
 import unicodedata
 from collections import Counter
 import spacy
@@ -160,8 +159,8 @@ def vectorize(opt, ex, word_dict, feature_dict):
         return document, features, question
 
     # ...or with target
-    start = torch.LongTensor(1).fill_(ex['target'][0])
-    end = torch.LongTensor(1).fill_(ex['target'][1])
+    start = torch.LongTensor([ex['target'][0]])
+    end = torch.LongTensor([ex['target'][1]])
 
     return document, features, question, start, end
 

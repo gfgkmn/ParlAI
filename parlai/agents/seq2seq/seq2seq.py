@@ -6,6 +6,7 @@
 
 from parlai.core.agents import Agent
 from parlai.core.dict import DictionaryAgent
+from parlai.core.utils import maintain_dialog_history
 from .modules import Seq2seq
 
 import torch
@@ -13,13 +14,10 @@ from torch.autograd import Variable
 from torch import optim
 import torch.nn as nn
 
+from collections import deque
+
 import os
 import random
-
-
-class SplitDictionaryAgent(DictionaryAgent):
-    def tokenize(self, text, **kwargs):
-        return text.split(' ')
 
 
 class Seq2seqAgent(Agent):
@@ -49,7 +47,7 @@ class Seq2seqAgent(Agent):
 
     @staticmethod
     def dictionary_class():
-        return SplitDictionaryAgent
+        return DictionaryAgent
 
     @staticmethod
     def add_cmdline_args(argparser):
@@ -90,9 +88,8 @@ class Seq2seqAgent(Agent):
         agent.add_argument('-tr', '--truncate', type=int, default=-1,
                            help='truncate input & output lengths to speed up '
                            'training (may reduce accuracy). This fixes all '
-                           'input and output to have a maximum length and to '
-                           'be similar in length to one another by throwing '
-                           'away extra tokens. This reduces the total amount '
+                           'input and output to have a maximum length. This '
+                           'reduces the total amount '
                            'of padding in the batches.')
         agent.add_argument('-rnn', '--rnn-class', default='lstm',
                            choices=Seq2seq.RNN_OPTS.keys(),
@@ -132,33 +129,50 @@ class Seq2seqAgent(Agent):
                            choices=['none', 'only', 'both'],
                            help='Enabled language modeling training on the '
                                 'concatenated input and label data.')
+        agent.add_argument('-hist', '--history-length', default=100000, type=int,
+                           help='Number of past tokens to remember. '
+                                'Default remembers 100000 tokens.')
+        agent.add_argument('-histr', '--history-replies',
+                           default='none', type=str,
+                           choices=['none', 'model', 'label'],
+                           help='Keep replies in the history, or not.')
 
     def __init__(self, opt, shared=None):
         """Set up model if shared params not set, otherwise no work to do."""
         super().__init__(opt, shared)
+        opt = self.opt  # there is a deepcopy in the init
 
-        # all instances needs truncate param
-        self.truncate = opt['truncate']
+        # all instances may need some params
+        self.truncate = opt['truncate'] if opt['truncate'] > 0 else None
+        self.history = {}
+
+        # check for cuda
+        self.use_cuda = not opt.get('no_cuda') and torch.cuda.is_available()
+
+
         if shared:
             # set up shared properties
             self.dict = shared['dict']
             self.START_IDX = shared['START_IDX']
             self.END_IDX = shared['END_IDX']
+            self.NULL_IDX = shared['NULL_IDX']
             # answers contains a batch_size list of the last answer produced
             self.answers = shared['answers']
+
+            if 'model' in shared:
+                # model is shared during hogwild
+                self.model = shared['model']
+                self.states = shared['states']
         else:
             # this is not a shared instance of this class, so do full init
-
             # answers contains a batch_size list of the last answer produced
             self.answers = [None] * opt['batchsize']
 
-            # check for cuda
-            self.use_cuda = not opt.get('no_cuda') and torch.cuda.is_available()
             if self.use_cuda:
                 print('[ Using CUDA ]')
                 torch.cuda.set_device(opt['gpu'])
 
-            states = {}
+            self.states = {}
             if opt.get('model_file') and os.path.isfile(opt['model_file']):
                 # load model parameters if available
                 print('Loading existing model params from ' + opt['model_file'])
@@ -178,15 +192,23 @@ class Seq2seqAgent(Agent):
             # we use END markers to end our output
             self.END_IDX = self.dict[self.dict.end_token]
             # get index of null token from dictionary (probably 0)
-            self.NULL_IDX = self.dict.txt2vec(self.dict.null_token)[0]
+            self.NULL_IDX = self.dict[self.dict.null_token]
 
             self.model = Seq2seq(opt, len(self.dict),
                                  padding_idx=self.NULL_IDX,
                                  start_idx=self.START_IDX,
                                  end_idx=self.END_IDX,
-                                 longest_label=states.get('longest_label', 1))
+                                 longest_label=self.states.get('longest_label', 1))
 
-            # store important params in self
+            if self.states:
+                # set loaded states if applicable
+                self.model.load_state_dict(self.states['model'])
+
+            if self.use_cuda:
+                self.model.cuda()
+
+        if hasattr(self, 'model'):
+            # if model was built, do more setup
             self.rank = opt['rank_candidates']
             self.lm = opt['language_model']
 
@@ -196,15 +218,16 @@ class Seq2seqAgent(Agent):
             if self.rank:
                 self.cands = torch.LongTensor(1, 1, 1)
 
-            # set up modules
+            # set up criteria
             self.criterion = nn.CrossEntropyLoss(ignore_index=self.NULL_IDX)
 
-            if states:
-                # set loaded states if applicable
-                self.model.load_state_dict(states['model'])
-
             if self.use_cuda:
-                self.cuda()
+                # push to cuda
+                self.xs = self.xs.cuda(async=True)
+                self.ys = self.ys.cuda(async=True)
+                if self.rank:
+                    self.cands = self.cands.cuda(async=True)
+                self.criterion.cuda()
 
             # set up optimizer
             lr = opt['learningrate']
@@ -214,12 +237,12 @@ class Seq2seqAgent(Agent):
                 kwargs['momentum'] = 0.95
                 kwargs['nesterov'] = True
             self.optimizer = optim_class(self.model.parameters(), **kwargs)
-            if states:
-                if states['optimizer_type'] != opt['optimizer']:
+            if self.states:
+                if self.states['optimizer_type'] != opt['optimizer']:
                     print('WARNING: not loading optim state since optim class '
                           'changed.')
                 else:
-                    self.optimizer.load_state_dict(states['optimizer'])
+                    self.optimizer.load_state_dict(self.states['optimizer'])
 
         self.reset()
 
@@ -260,15 +283,6 @@ class Seq2seqAgent(Agent):
                 new_vec.append(i)
         return self.dict.vec2txt(new_vec)
 
-    def cuda(self):
-        """Push parameters to the GPU."""
-        self.xs = self.xs.cuda(async=True)
-        self.ys = self.ys.cuda(async=True)
-        if self.rank:
-            self.cands = self.cands.cuda(async=True)
-        self.criterion.cuda()
-        self.model.cuda()
-
     def zero_grad(self):
         """Zero out optimizer."""
         self.optimizer.zero_grad()
@@ -289,47 +303,33 @@ class Seq2seqAgent(Agent):
         shared['dict'] = self.dict
         shared['START_IDX'] = self.START_IDX
         shared['END_IDX'] = self.END_IDX
+        shared['NULL_IDX'] = self.NULL_IDX
+        if self.opt.get('numthreads', 1) > 1:
+            shared['model'] = self.model
+            self.model.share_memory()
+            shared['states'] = self.states
         return shared
 
     def observe(self, observation):
         """Save observation for act.
         If multiple observations are from the same episode, concatenate them.
         """
+        self.episode_done = observation['episode_done']
         # shallow copy observation (deep copy can be expensive)
-        observation = observation.copy()
-        if 'text' in observation:
-            if observation['text'] == '':
-                observation.pop('text')
-            else:
-                # put START and END around text
-                parsed_x = [self.START_IDX]
-                parsed_x.extend(self.parse(observation['text']))
-                parsed_x.append(self.END_IDX)
-                if self.truncate > 0:
-                    parsed_x = parsed_x[-self.truncate:]
-                observation['text'] = parsed_x
-
-                if not self.episode_done:
-                    # don't remember past dialog
-                    # prev_dialog = self.observation['text']
-                    prev_dialog = []
-                    # get last y
-                    batch_idx = self.opt.get('batchindex', 0)
-                    if self.answers[batch_idx] is not None:
-                        # use our last answer, which is the label during training
-                        lastY = self.answers[batch_idx]
-                        prev_dialog.append(self.START_IDX)
-                        prev_dialog.extend(lastY)
-                        prev_dialog.append(self.END_IDX)
-                        self.answers[batch_idx] = None  # forget last y
-                    prev_dialog.extend(parsed_x)
-                    if self.truncate > 0:
-                        prev_dialog = prev_dialog[-self.truncate:]
-                    observation['text'] = prev_dialog
-                self.observation = observation
-                self.episode_done = observation['episode_done']
-
-        return observation
+        obs = observation.copy()
+        batch_idx = self.opt.get('batchindex', 0)
+        if not obs.get('preprocessed', False):
+            obs['text2vec'] = maintain_dialog_history(
+                self.history, obs,
+                reply=self.answers[batch_idx],
+                historyLength=self.opt['history_length'],
+                useReplies=self.opt['history_replies'],
+                dict=self.dict)
+        else:
+            obs['text2vec'] = deque(obs['text2vec'], self.opt['history_length'])
+        self.observation = obs
+        self.answers[batch_idx] = None
+        return obs
 
     def predict(self, xs, ys=None, cands=None, valid_cands=None, lm=False):
         """Produce a prediction from our model.
@@ -344,7 +344,7 @@ class Seq2seqAgent(Agent):
             self.zero_grad()
             loss = 0
             predictions, scores, _ = self.model(xs, ys)
-            for i in range(ys.size(1)):
+            for i in range(scores.size(1)):
                 # sum loss per-token
                 score = scores.select(1, i)
                 y = ys.select(1, i)
@@ -364,9 +364,9 @@ class Seq2seqAgent(Agent):
         """Convert a list of observations into input & target tensors."""
         def valid(obs):
             # check if this is an example our model should actually process
-            return 'text' in obs
-        # valid examples and their indices
+            return 'text2vec' in obs and len(obs['text2vec']) > 0
         try:
+            # valid examples and their indices
             valid_inds, exs = zip(*[(i, ex) for i, ex in
                                     enumerate(observations) if valid(ex)])
         except ValueError:
@@ -377,7 +377,8 @@ class Seq2seqAgent(Agent):
         bsz = len(exs)
 
         # `x` text is already tokenized and truncated
-        parsed_x = [ex['text'] for ex in exs]
+        # sort by length so we can use pack_padded
+        parsed_x = [ex['text2vec'] for ex in exs]
         x_lens = [len(x) for x in parsed_x]
         ind_sorted = sorted(range(len(x_lens)), key=lambda k: -x_lens[k])
 
@@ -385,17 +386,20 @@ class Seq2seqAgent(Agent):
         valid_inds = [valid_inds[k] for k in ind_sorted]
         parsed_x = [parsed_x[k] for k in ind_sorted]
 
+        labels_avail = any(['labels' in ex for ex in exs])
+
         if lm:
             self.xs.resize_(bsz, 1)
             self.xs.fill_(self.START_IDX)
             xs = Variable(self.xs)
         else:
             max_x_len = max([len(x) for x in parsed_x])
-            xs = torch.LongTensor(bsz, max_x_len).fill_(self.NULL_IDX)
-            # right-padded with zeros
-            for i, x in enumerate(parsed_x):
-                for j, idx in enumerate(x):
-                    xs[i][j] = idx
+
+            # TODO: move zero padding to utility function?
+            parsed_x = [x if len(x) == max_x_len else
+                        x + deque((self.NULL_IDX,)) * (max_x_len - len(x))
+                        for x in parsed_x]
+            xs = torch.LongTensor(parsed_x)
             if self.use_cuda:
                 # copy to gpu
                 self.xs.resize_(xs.size())
@@ -407,22 +411,26 @@ class Seq2seqAgent(Agent):
         # set up the target tensors
         ys = None
         labels = None
-        if any(['labels' in ex for ex in exs]):
+        if labels_avail:
             # randomly select one of the labels to update on, if multiple
             labels = [random.choice(ex.get('labels', [''])) for ex in exs]
             # parse each label and append END
-            parsed_y = [self.parse(y) + [self.END_IDX] for y in labels]
+            parsed_y = [deque(maxlen=self.truncate) for _ in labels]
+            for dq, y in zip(parsed_y, labels):
+                dq.extendleft(reversed(self.parse(y)))
+            for y in parsed_y:
+                y.append(self.END_IDX)
             if lm:
-                parsed_y = [parsed_x[i] + parsed_y[i] for i in range(bsz)]
+                for x, y in zip(parsed_x, parsed_y):
+                    if y.maxlen is not None:
+                        y = deque(y, maxlen=y.maxlen * 2)
+                    y.extendleft(reversed(x))
 
             max_y_len = max(len(y) for y in parsed_y)
-            if self.truncate > 0 and max_y_len > self.truncate:
-                parsed_y = [y[:self.truncate] for y in parsed_y]
-                max_y_len = self.truncate
-            ys = torch.LongTensor(bsz, max_y_len).fill_(self.NULL_IDX)
-            for i, y in enumerate(parsed_y):
-                for j, idx in enumerate(y):
-                    ys[i][j] = idx
+            parsed_y = [y if len(y) == max_y_len else
+                        y + deque((self.NULL_IDX,)) * (max_y_len - len(y))
+                        for y in parsed_y]
+            ys = torch.LongTensor(parsed_y)
             if self.use_cuda:
                 # copy to gpu
                 self.ys.resize_(ys.size())
@@ -443,7 +451,10 @@ class Seq2seqAgent(Agent):
                     # each candidate tuple is a pair of the parsed version and
                     # the original full string
                     cs = list(observations[v]['label_candidates'])
-                    parsed_cs.append([self.parse(c) for c in cs])
+                    curr_dqs = [deque(maxlen=self.truncate) for _ in cs]
+                    for dq, c in zip(curr_dqs, cs):
+                        dq.extendleft(reversed(self.parse(c)))
+                    parsed_cs.append(curr_dqs)
                     valid_cands.append((i, v, cs))
             if len(parsed_cs) > 0:
                 # TODO: store lengths of cands separately, so don't have zero
@@ -451,11 +462,11 @@ class Seq2seqAgent(Agent):
                 # found cands, pack them into tensor
                 max_c_len = max(max(len(c) for c in cs) for cs in parsed_cs)
                 max_c_cnt = max(len(cs) for cs in parsed_cs)
-                cands = torch.LongTensor(len(parsed_cs), max_c_cnt, max_c_len).fill_(self.NULL_IDX)
-                for i, cs in enumerate(parsed_cs):
-                    for j, c in enumerate(cs):
-                        for k, idx in enumerate(c):
-                            cands[i][j][k] = idx
+                for cs in parsed_cs:
+                    for c in cs:
+                        c += [self.NULL_IDX] * (max_c_len - len(c))
+                    cs += [self.NULL_IDX] * (max_c_cnt - len(cs))
+                cands = torch.LongTensor(parsed_cs)
                 if self.use_cuda:
                     # copy to gpu
                     self.cands.resize_(cands.size())

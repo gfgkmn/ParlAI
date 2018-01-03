@@ -7,18 +7,25 @@
 from parlai.core.agents import Agent
 from parlai.core.dict import DictionaryAgent
 
-from fairseq import models
-from fairseq.models import fconv
-from fairseq.multiprocessing_trainer import MultiprocessingTrainer
-from fairseq import criterions
-from fairseq import dictionary
-from fairseq.sequence_generator import SequenceGenerator
-from fairseq import options
+try:
+    from .fairseq_py.fairseq import models
+except ImportError:
+    raise RuntimeError("Please run 'python setup.py build' and "
+                       "'python setup.py develop' from the fairseq_py directory")
+from .fairseq_py.fairseq.models import fconv
+from .fairseq_py.fairseq.multiprocessing_trainer import MultiprocessingTrainer
+from .fairseq_py.fairseq import criterions
+from .fairseq_py.fairseq import dictionary
+from .fairseq_py.fairseq.sequence_generator import SequenceGenerator
+from .fairseq_py.fairseq import options
 
 from torch.autograd import Variable
-import torch
-import random
+
+from collections import deque
 import argparse
+import numpy as np
+import random
+import torch
 import os
 
 
@@ -52,6 +59,13 @@ class FairseqAgent(Agent):
         DictionaryAgent.add_cmdline_args(argparser)
         agent = argparser.add_argument_group('Fairseq Arguments')
         agent.add_argument(
+            '-tr', '--truncate',
+            type=int, default=-1,
+            help='truncate input & output lengths to speed up training (may '
+                 'reduce accuracy). This fixes all input and output to have a '
+                 'maximum length. This reduces the total amount of padding in '
+                 'the batches.')
+        agent.add_argument(
             '--max-positions',
             default=1024,
             type=int,
@@ -83,19 +97,23 @@ class FairseqAgent(Agent):
                 opt = self._override_opt(new_opt)
 
             self.args = OptWrapper(opt)
-            self.fairseq_dict = _make_fairseq_dict(DictionaryAgent(opt))
+            self.parlai_dict = DictionaryAgent(opt)
+            self.fairseq_dict = _make_fairseq_dict(self.parlai_dict)
             self.id = 'Fairseq'
+            self.truncate = opt['truncate'] if opt['truncate'] > 0 else None
 
             self.EOS = self.fairseq_dict[self.fairseq_dict.eos()]
+            self.EOS_TENSOR = (torch.LongTensor(1, 1)
+                               .fill_(self.fairseq_dict.eos()))
             self.NULL_IDX = self.fairseq_dict.pad()
 
-            encoder = fconv.Encoder(
+            encoder = fconv.FConvEncoder(
                 self.fairseq_dict,
                 embed_dim=self.args.encoder_embed_dim,
                 convolutions=eval(self.args.encoder_layers),
                 dropout=self.args.dropout,
                 max_positions=self.args.max_positions)
-            decoder = fconv.Decoder(
+            decoder = fconv.FConvDecoder(
                 self.fairseq_dict,
                 embed_dim=self.args.decoder_embed_dim,
                 convolutions=eval(self.args.decoder_layers),
@@ -111,12 +129,11 @@ class FairseqAgent(Agent):
                     self.args.label_smoothing, self.NULL_IDX)
             else:
                 self.criterion = criterions.CrossEntropyCriterion(
-                    self.NULL_IDX)
+                    self.args, self.fairseq_dict)
 
             self.trainer = MultiprocessingTrainer(self.args, self.model, self.criterion)
             if saved_state is not None:
                 self.set_states(saved_state)
-
         self.reset()
 
     def _override_opt(self, new_opt):
@@ -155,7 +172,7 @@ class FairseqAgent(Agent):
     def observe(self, observation):
         # shallow copy observation (deep copy can be expensive)
         observation = observation.copy()
-        if not self.episode_done:
+        if not self.episode_done and not observation.get('preprocessed', False):
             # if the last example wasn't the end of an episode, then we need to
             # recall what was said in that example
             prev_dialogue = self.observation['text']
@@ -169,39 +186,58 @@ class FairseqAgent(Agent):
         return self.batch_act([self.observation])[0]
 
     def batch_act(self, observations):
-        batchsize = len(observations)
+        bsz = len(observations)
         # initialize a table of replies with this agent's id
-        batch_reply = [{'id': self.getID()} for _ in range(batchsize)]
+        batch_reply = [{'id': self.getID()} for _ in range(bsz)]
 
         # convert the observations into batches of inputs and targets
         # valid_inds tells us the indices of all valid examples
         # e.g. for input [{}, {'text': 'hello'}, {}, {}], valid_inds is [1]
         # since the other three elements had no 'text' field
-        xs, ys, valid_inds = self.batchify(observations)
 
-        if len(xs) == 0:
+        # also, split observations into sub-batches based on number of gpus
+        obs_split = np.array_split(observations, self.trainer.num_replicas)
+        samples = [self.batchify(obs) for obs in obs_split]
+        samples = [s for s in samples if s[0] is not None]
+        any_valid = any(len(s[0]) > 0 for s in samples)
+
+        if not any_valid:
             # no valid examples, just return the empty responses we set up
             return batch_reply
 
         # produce predictions if testing; otherwise, train
+        has_targets = any(s[1] is not None for s in samples)
+        if not has_targets:
+            offset = 0
+            for s in samples:
+                xs = s[0]
+                valid_inds = s[2]
 
-        if ys is None:
-            predictions = self._generate(self.args, xs)
-            for i in range(len(predictions)):
-                # map the predictions back to non-empty examples in the batch
-                batch_reply[valid_inds[i]]['text'] = predictions[i]
-                if i == 0:
-                    print('prediction:', predictions[i])
+                predictions = self._generate(self.args, xs)
+                for i in range(len(predictions)):
+                    # map the predictions back to non-empty examples in the batch
+                    batch_reply[valid_inds[i] + offset]['text'] = predictions[i]
+                    if i == 0:
+                        print('prediction:', predictions[i])
+                offset += len(valid_inds)
         else:
-            loss = self._train(xs, ys)
+            loss = self._train(samples)
+
             batch_reply[0]['metrics'] = {}
             for k, v in loss.items():
-                batch_reply[0]['metrics'][k] = v * batchsize
+                batch_reply[0]['metrics'][k] = v * bsz
+                if k == 'loss':
+                    try:
+                        perplexity = 2 ** v * bsz
+                    except OverflowError:
+                        perplexity = float('inf')
+                    batch_reply[0]['metrics']['perplexity'] = perplexity
 
         return batch_reply
 
     def parse(self, string):
-        return [self.fairseq_dict.index(word) for word in string.split(' ')]
+        return [self.fairseq_dict.index(word)
+                for word in self.parlai_dict.tokenize(string)]
 
     def batchify(self, observations):
         """Convert a list of observations into input & target tensors."""
@@ -212,47 +248,44 @@ class FairseqAgent(Agent):
 
         # set up the input tensors
         batchsize = len(exs)
+        if batchsize == 0:
+            return None, None, None
         # tokenize the text
-        parsed = [self.parse(ex['text']) for ex in exs]
-        max_x_len = max([len(x) for x in parsed])
-        xs = torch.LongTensor(batchsize,
-                              max_x_len).fill_(self.fairseq_dict.pad())
-        # pack the data to the right side of the tensor for this model
-        for i, x in enumerate(parsed):
-            offset = max_x_len - len(x)
-            for j, idx in enumerate(x):
-                xs[i][j + offset] = idx
-        xs = xs.cuda(async=True)
+        parsed_x = [deque(maxlen=self.truncate) for _ in exs]
+        for dq, ex in zip(parsed_x, exs):
+            dq += self.parse(ex['text'])
+        # parsed = [self.parse(ex['text']) for ex in exs]
+        max_x_len = max((len(x) for x in parsed_x))
+        for x in parsed_x:
+            # left pad with zeros
+            x.extendleft([self.fairseq_dict.pad()] * (max_x_len - len(x)))
+        xs = torch.LongTensor(parsed_x)
+
         # set up the target tensors
         ys = None
         if 'labels' in exs[0]:
             # randomly select one of the labels to update on, if multiple
+            labels = [random.choice(ex.get('labels', [''])) for ex in exs]
+            parsed_y = [deque(maxlen=self.truncate) for _ in labels]
+            for dq, y in zip(parsed_y, labels):
+                dq.extendleft(reversed(self.parse(y)))
+            for y in parsed_y:
+                y.append(self.fairseq_dict.eos())
             # append EOS to each label
-            labels = [
-                random.choice(ex['labels']) + ' ' + self.EOS for ex in exs
-            ]
-            parsed = [self.parse(y) for y in labels]
-            max_y_len = max(len(y) for y in parsed)
-            ys = torch.LongTensor(batchsize,
-                                  max_y_len).fill_(self.fairseq_dict.pad())
-            for i, y in enumerate(parsed):
-                for j, idx in enumerate(y):
-                    ys[i][j] = idx
-            ys = ys.cuda(async=True)
+            max_y_len = max(len(y) for y in parsed_y)
+            for y in parsed_y:
+                y += [self.fairseq_dict.pad()] * (max_y_len - len(y))
+            ys = torch.LongTensor(parsed_y)
         return xs, ys, valid_inds
 
     def _positions_for_tokens(self, tokens):
-        start = self.fairseq_dict.pad() + 1
         size = tokens.size()
-        positions = torch.LongTensor(size).fill_(self.fairseq_dict.pad())
-        for i in range(size[0]):
-            nonpad = 0
-            for j in range(size[1]):
-                if (tokens[i][j] != self.fairseq_dict.pad()):
-                    positions[i][j] = start + nonpad
-                    nonpad += 1
-        positions = positions.cuda(async=True)
-        return positions
+        not_pad = tokens.ne(self.fairseq_dict.pad()).long()
+        new_pos = tokens.new(size).fill_(self.fairseq_dict.pad())
+        new_pos += not_pad
+        for i in range(1, size[1]):
+            new_pos[:, i] += new_pos[:, i-1] - 1
+        return new_pos
 
     def _right_shifted_ys(self, ys):
         result = torch.LongTensor(ys.size())
@@ -269,9 +302,8 @@ class FairseqAgent(Agent):
                 normalize_scores=(not opt.unnormalized),
                 len_penalty=opt.lenpen)
             self.translator.cuda()
-        tokens = src_tokens
-        translations = self.translator.generate(
-            Variable(tokens), Variable(self._positions_for_tokens(tokens)))
+        tokens = src_tokens.cuda(async=True)
+        translations = self.translator.generate(Variable(tokens))
         results = [t[0] for t in translations]
         output_lines = [[] for _ in range(len(results))]
         for i in range(len(results)):
@@ -279,15 +311,14 @@ class FairseqAgent(Agent):
                                        for idx in results[i]['tokens'][:-1])
         return output_lines
 
-    def _train(self, xs, ys=None):
-        """Produce a prediction from our model. Update the model using the
-        targets if available.
-        """
-        if ys is not None:
+    def _train(self, samples):
+        """Update the model using the targets."""
+        for i, sample in enumerate(samples):
+            # add extra info to samples
             sample = {
-                'src_tokens': xs,
-                'input_tokens': self._right_shifted_ys(ys),
-                'target': ys,
+                'src_tokens': sample[0],
+                'input_tokens': self._right_shifted_ys(sample[1]),
+                'target': sample[1],
                 'id': None
             }
             sample['ntokens'] = sum(len(t) for t in sample['target'])
@@ -295,7 +326,8 @@ class FairseqAgent(Agent):
                 sample['src_tokens'])
             sample['input_positions'] = self._positions_for_tokens(
                 sample['input_tokens'])
-            return self.trainer.train_step([sample])
+            samples[i] = sample
+        return self.trainer.train_step(samples)
 
     def save(self, path=None):
         path = self.opt.get('model_file', None) if path is None else path
