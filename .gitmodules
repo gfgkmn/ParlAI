@@ -1,0 +1,3 @@
+[submodule "parlai/agents/allen/allennlp"]
+	path = parlai/agents/allen/allennlp
+	url = git@github.com:gfgkmn/allennlp.git

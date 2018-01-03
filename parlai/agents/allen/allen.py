@@ -12,12 +12,10 @@ from parlai.core.worlds import display_messages
 from parlai.core.utils import translate
 import sys
 from os import path
-sys.path.append(path.dirname(path.abspath(__file__)))
+sys.path.append(path.join(path.dirname(path.abspath(__file__)), 'allennlp'))
 from allennlp.models.archival import load_archive
 from allennlp.data.dataset import Dataset
 from allennlp.data.dataset_readers.dataset_reader import DatasetReader
-from allennlp.nn.util import arrays_to_variables
-from allennlp.data.iterators import DataIterator
 
 class AllenAgent(Agent):
 

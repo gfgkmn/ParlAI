@@ -9,7 +9,7 @@ import time
 import json
 import requests
 
-translate_token = ""
+translate_token = "ssdj273ksdiwi923bsd9"
 
 
 class Predictor(object):
