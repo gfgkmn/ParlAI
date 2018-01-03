@@ -8,3 +8,7 @@ flask_cors
 matplotlib
 seaborn
 h5py
+html5lib
+wcwidth
+thinc
+tensorboard
