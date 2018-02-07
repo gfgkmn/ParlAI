@@ -114,3 +114,4 @@ heroku-cli-*
 # IntelliJ IDEA
 .idea
 *.iml
+frontend_demo/attention_vis/
