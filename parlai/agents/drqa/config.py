@@ -4,11 +4,6 @@
 # LICENSE file in the root directory of this source tree. An additional grant
 # of patent rights can be found in the PATENTS file in the same directory.
 import os
-import sys
-import logging
-
-def str2bool(v):
-    return v.lower() in ('yes', 'true', 't', '1', 'y')
 
 
 def add_cmdline_args(parser):
@@ -21,7 +16,7 @@ def add_cmdline_args(parser):
     # Basics
     agent.add_argument('--embedding_file', type=str, default=None,
                         help='File of space separated embeddings: w e1 ... ed')
-    agent.add_argument('--pretrained_model', type=str, default=None,
+    agent.add_argument('--init_model', type=str, default=None,
                         help='Load dict/features/weights/opts from this file')
     agent.add_argument('--log_file', type=str, default=None)
 
@@ -106,7 +101,7 @@ def set_defaults(opt):
 
     # Make sure fix_embeddings and embedding_file are consistent
     if opt['fix_embeddings']:
-        if not opt.get('embedding_file') and not opt.get('pretrained_model'):
+        if not opt.get('embedding_file') and not opt.get('init_model'):
             print('Setting fix_embeddings to False as embeddings are random.')
             opt['fix_embeddings'] = False
 

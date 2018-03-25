@@ -9,10 +9,11 @@ between processes.
 """
 
 from parlai.core.thread_utils import SharedTable
-from parlai.core.utils import round_sigfigs
+from parlai.core.utils import round_sigfigs, no_lock
 from collections import Counter
 
 import re
+import math
 
 re_art = re.compile(r'\b(a|an|the)\b')
 re_punc = re.compile(r'[!"#$%&()*+,-./:;<=>?@\[\]\\^`{|}~_\']')
@@ -63,27 +64,88 @@ def _f1_score(guess, answers):
     return max(scores)
 
 
+def aggregate_metrics(reporters):
+    #reporters is a list of teachers or worlds
+    m = {}
+    m['tasks'] = {}
+    sums = {'accuracy': 0, 'f1': 0, 'loss': 0, 'ppl': 0}
+    num_tasks = 0
+    total = 0
+    for i in range(len(reporters)):
+        tid = reporters[i].getID()
+        mt = reporters[i].report()
+        while tid in m['tasks']:
+            # prevent name cloberring if using multiple tasks with same ID
+            tid += '_'
+        m['tasks'][tid] = mt
+        total += mt['total']
+        found_any = False
+        for k in sums.keys():
+            if k in mt:
+                sums[k] += mt[k]
+                found_any = True
+        if found_any:
+            num_tasks += 1
+    m['total'] = total
+    m['accuracy'] = 0
+    if num_tasks > 0:
+        for k in sums.keys():
+            m[k] = round_sigfigs(sums[k] / num_tasks, 4)
+    return m
+
+
+def compute_time_metrics(world, max_time):
+    # Determine time_left and num_epochs
+    exs_per_epoch = world.num_examples() if world.num_examples() else 0
+    num_epochs = world.opt.get('num_epochs', 0)
+    max_exs = exs_per_epoch * num_epochs
+    total_exs = world.get_total_exs()
+
+    m = {}
+    if (max_exs > 0 and total_exs > 0) or max_time > 0:
+        m = {}
+        time_left = None
+        time = world.get_time()
+        total_epochs = world.get_total_epochs()
+
+        if (num_epochs > 0 and total_exs > 0 and max_exs > 0):
+            exs_per_sec = time / total_exs
+            time_left = (max_exs - total_exs) * exs_per_sec
+        if max_time > 0:
+            other_time_left = max_time - time
+            if time_left is not None:
+                time_left = min(time_left, other_time_left)
+            else:
+                time_left = other_time_left
+        if time_left is not None:
+            m['time_left'] = math.floor(time_left)
+        if num_epochs > 0:
+            if (total_exs > 0 and exs_per_epoch > 0):
+                display_epochs = int(total_exs / exs_per_epoch)
+            else:
+                display_epochs = total_epochs
+            m['num_epochs'] = display_epochs
+    return m
+
+
 class Metrics(object):
     """Class that maintains evaluation metrics over dialog."""
 
     def __init__(self, opt):
         self.metrics = {}
         self.metrics['cnt'] = 0
-        self.metrics['correct'] = 0
-        self.metrics['f1'] = 0.0
+        self.metrics_list = ['mean_rank', 'loss', 'correct', 'f1', 'ppl']
+        for k in self.metrics_list:
+            self.metrics[k] = 0.0
+            self.metrics[k + '_cnt'] = 0
         self.eval_pr = [1, 5, 10, 100]
         for k in self.eval_pr:
             self.metrics['hits@' + str(k)] = 0
+        self.metrics['hits@_cnt'] = 0
+        self.flags = {'has_text_cands': False, 'print_prediction_metrics': False}
         if opt.get('numthreads', 1) > 1:
             self.metrics = SharedTable(self.metrics)
-        self.datatype = opt.get('datatype', 'train')
-        self.custom_keys = []
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        pass
+            self.flags = SharedTable(self.flags)
 
     def __str__(self):
         return str(self.metrics)
@@ -97,35 +159,36 @@ class Metrics(object):
             return self.metrics.get_lock()
         else:
             # otherwise do nothing
-            return self
+            return no_lock()
 
     def update_ranking_metrics(self, observation, labels):
         text_cands = observation.get('text_candidates', None)
         if text_cands is None:
+            return
+        else:
             text = observation.get('text', None)
-            if text is None:
-                return
-            else:
-                text_cands = [text]
-        # Now loop through text candidates, assuming they are sorted.
-        # If any of them is a label then score a point.
-        # maintain hits@1, 5, 10, 50, 100,  etc.
-        label_set = set(_normalize_answer(l) for l in labels)
-        cnts = {k: 0 for k in self.eval_pr}
-        cnt = 0
-        for c in text_cands:
-            cnt += 1
-            if _normalize_answer(c) in label_set:
+
+            # Now loop through text candidates, assuming they are sorted.
+            # If any of them is a label then score a point.
+            # maintain hits@1, 5, 10, 50, 100,  etc.
+            label_set = set(_normalize_answer(l) for l in labels)
+            cnts = {k: 0 for k in self.eval_pr}
+            cnt = 0
+            for c in text_cands:
+                cnt += 1
+                if _normalize_answer(c) in label_set:
+                    for k in self.eval_pr:
+                        if cnt <= k:
+                            cnts[k] += 1
+            # hits metric is 1 if cnts[k] > 0.
+            # (other metrics such as p@k and r@k take
+            # the value of cnt into account.)
+            with self._lock():
+                self.flags['has_text_cands'] = True
                 for k in self.eval_pr:
-                    if cnt <= k:
-                        cnts[k] += 1
-        # hits metric is 1 if cnts[k] > 0.
-        # (other metrics such as p@k and r@k take
-        # the value of cnt into account.)
-        with self._lock():
-            for k in self.eval_pr:
-                if cnts[k] > 0:
-                    self.metrics['hits@' + str(k)] += 1
+                    if cnts[k] > 0:
+                        self.metrics['hits@' + str(k)] += 1
+                self.metrics['hits@_cnt'] += 1
 
     def update(self, observation, labels):
         with self._lock():
@@ -134,15 +197,19 @@ class Metrics(object):
         # Exact match metric.
         correct = 0
         prediction = observation.get('text', None)
-        if _exact_match(prediction, labels):
-            correct = 1
-        with self._lock():
-            self.metrics['correct'] += correct
+        if prediction is not None:
+            if _exact_match(prediction, labels):
+                correct = 1
+            with self._lock():
+                self.flags['print_prediction_metrics'] = True
+                self.metrics['correct'] += correct
+                self.metrics['correct_cnt'] += 1
 
-        # F1 metric.
-        f1 = _f1_score(prediction, labels)
-        with self._lock():
-            self.metrics['f1'] += f1
+            # F1 metric.
+            f1 = _f1_score(prediction, labels)
+            with self._lock():
+                self.metrics['f1'] += f1
+                self.metrics['f1_cnt'] += 1
 
         # Ranking metrics.
         self.update_ranking_metrics(observation, labels)
@@ -151,12 +218,21 @@ class Metrics(object):
         if 'metrics' in observation:
             for k, v in observation['metrics'].items():
                 if k not in ['correct', 'f1', 'hits@k']:
-                    with self._lock():
-                        if k not in self.metrics:
-                            self.custom_keys.append(k)
-                            self.metrics[k] = v
-                        else:
+                    if k in self.metrics_list:
+                        with self._lock():
                             self.metrics[k] += v
+                            self.metrics[k + '_cnt'] += 1
+                    else:
+                        if type(self.metrics) is SharedTable:
+                            # can't share custom metrics during hogwild
+                            pass
+                        else:
+                            if k not in self.metrics:
+                                self.metrics[k] = v
+                                self.metrics_list.append(k)
+                                self.metrics[k + '_cnt'] = 1.0
+                            else:
+                                self.metrics[k] += v
 
         # Return a dict containing the metrics for this specific example.
         # Metrics across all data is stored internally in the class, and
@@ -171,22 +247,30 @@ class Metrics(object):
         total = self.metrics['cnt']
         m['total'] = total
         if total > 0:
-            m['accuracy'] = round_sigfigs(self.metrics['correct'] / total, 4)
-            m['f1'] = round_sigfigs(self.metrics['f1'] / total, 4)
-            m['hits@k'] = {}
-            for k in self.eval_pr:
-                m['hits@k'][k] = round_sigfigs(
-                    self.metrics['hits@' + str(k)] / total, 3)
-            for k in self.custom_keys:
-                m[k] = round_sigfigs(self.metrics[k] / total, 3)
+            if self.flags['print_prediction_metrics']:
+                m['accuracy'] = round_sigfigs(self.metrics['correct'] / self.metrics['correct_cnt'], 4)
+                m['f1'] = round_sigfigs(self.metrics['f1'] / self.metrics['f1_cnt'], 4)
+                if self.flags['has_text_cands']:
+                    m['hits@k'] = {}
+                    for k in self.eval_pr:
+                        m['hits@k'][k] = round_sigfigs(
+                            self.metrics['hits@' + str(k)] / self.metrics['hits@_cnt'], 3)
+            for k in self.metrics_list:
+                if self.metrics[k + '_cnt'] > 0 and k != 'correct' and k != 'f1':
+                    m[k] = round_sigfigs(self.metrics[k] / self.metrics[k + '_cnt'], 4)
         return m
 
     def clear(self):
         with self._lock():
             self.metrics['cnt'] = 0
-            self.metrics['correct'] = 0
-            self.metrics['f1'] = 0.0
+            for k in self.metrics_list:
+                v = self.metrics[k]
+                v_typ = type(v)
+                if 'Tensor' in str(v_typ):
+                    self.metrics[k].zero_()
+                else:
+                    self.metrics[k] = 0.0
+                self.metrics[k + '_cnt'] = 0
             for k in self.eval_pr:
                 self.metrics['hits@' + str(k)] = 0
-            for k in self.custom_keys:
-                self.metrics.pop(k, None)  # safer then casting to zero
+            self.metrics['hits@_cnt'] = 0

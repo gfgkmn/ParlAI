@@ -9,6 +9,13 @@ and the tags associated with them.
 
 task_list = [
     {
+        "id": "AQuA",
+        "display_name": "AQuA",
+        "task": "aqua",
+        "tags": [ "All",  "QA" ],
+        "description": "Dataset containing algebraic word problems with rationales for their answers. From Ling et. al. 2017, Link: https://arxiv.org/pdf/1705.04146.pdf"
+    },
+    {
         "id": "bAbI-1k",
         "display_name": "bAbI 1k",
         "task": "babi:All1k",
@@ -39,11 +46,18 @@ task_list = [
         "description": "Sentence completion given a few sentences as context from a children's book. From Hill et al., '16. Link: https://arxiv.org/abs/1511.02301"
     },
     {
+        "id": "COPA",
+        "display_name": "Choice of Plausible Alternatives",
+        "task": "copa",
+        "tags": [ "All",  "Reasoning" ],
+        "description": "The Choice Of Plausible Alternatives (COPA) evaluation provides researchers with a tool for assessing progress in open-domain commonsense causal reasoning. COPA consists of 1000 questions, split equally into development and test sets of 500 questions each. See http://people.ict.usc.edu/~gordon/copa.html for more information"
+    },
+    {
         "id": "CornellMovie",
         "display_name": "Cornell Movie",
         "task": "cornell_movie",
         "tags": [ "All",  "ChitChat" ],
-        "description": "Fictional conversations extracted from raw movie scripts. Link: https://www.cs.cornell.edu/~cristian/Cornell_Movie-Dialogs_Corpus.html"
+        "description": "Fictional conversations extracted from raw movie scripts. Danescu-Niculescu-Mizil & Lee, '11. Link: https://arxiv.org/abs/1106.3077"
     },
     {
         "id": "DBLL-bAbI",
@@ -137,11 +151,26 @@ task_list = [
         "description": "Closed-domain QA dataset asking MTurk-derived questions about movies, answerable from Wikipedia. From Li et al. '16. Link: https://arxiv.org/abs/1611.09823"
     },
     {
+        "id": "MultiNLI",
+        "display_name": "MultiNLI",
+        "task": "multinli",
+        "tags": [ "All",  "Entailment" ],
+        "description": "A dataset designed for use in the development and evaluation of machine learning models for sentence understanding. Each example contains a premise and hypothesis. Model has to predict whether premise and hypothesis entail, contradict or are neutral to each other. From Williams et al. '17. Link: https://arxiv.org/abs/1704.05426"
+    },
+    {
+        "id": "NarrativeQA",
+        "display_name": "NarrativeQA",
+        "task": "narrative_qa",
+        "tags": [ "All",  "QA" ],
+        "description": "A dataset and set of tasks in which the reader must answer questions about stories by reading entire books or movie scripts. From Kočiský et. al. '17. Link: https://arxiv.org/abs/1712.07040'",
+        "notes": "You can access summaries only task for NarrativeQA by using task 'narrative_qa:summaries'. By default, only stories are provided."
+    },
+    {
         "id": "OpenSubtitles",
         "display_name": "Open Subtitles",
         "task": "opensubtitles",
         "tags": [ "All",  "ChitChat" ],
-        "description": "Dataset of dialogs from movie scripts: http://opus.lingfil.uu.se/OpenSubtitles.php. A variant of the dataset used in Vinyals & Le '15, https://arxiv.org/abs/1506.05869."
+        "description": "Dataset of dialogs from movie scripts. Version 2018: http://opus.lingfil.uu.se/OpenSubtitles2018.php, version 2009: http://opus.lingfil.uu.se/OpenSubtitles.php. A variant of the dataset used in Vinyals & Le '15, https://arxiv.org/abs/1506.05869."
     },
     {
         "id": "personalized-dialog-full",
@@ -179,6 +208,13 @@ task_list = [
         "description": "Open-domain QA dataset based on Freebase triples from Bordes et al. '15. Link: https://arxiv.org/abs/1506.02075"
     },
     {
+        "id": "SNLI",
+        "display_name": "The Stanford Natural Language Inference (SNLI) Corpus",
+        "task": "snli",
+        "tags": [ "All",  "Entailment" ],
+        "description": "The SNLI corpus (version 1.0) is a collection of 570k human-written English sentence pairs manually labeled for balanced classification with the labels entailment, contradiction, and neutral, supporting the task of natural language inference (NLI), also known as recognizing textual entailment (RTE). See https://nlp.stanford.edu/projects/snli/"
+    },
+    {
         "id": "SQuAD",
         "display_name": "SQuAD",
         "task": "squad",
@@ -191,6 +227,13 @@ task_list = [
         "task": "triviaqa",
         "tags": [ "All",  "QA" ],
         "description": "Open-domain QA dataset with question-answer-evidence triples, from Joshi et al. '17. Link: https://arxiv.org/abs/1705.03551"
+    },
+    {
+        "id": "TaskNTalk",
+        "display_name": "Task N' Talk",
+        "task": "taskntalk",
+        "tags": [ "All",  "Goal" ],
+        "description": "Dataset of synthetic shapes described by attributes, for agents to play a cooperative QA game, from Kottur et al. '17. Link: https://arxiv.org/abs/1706.08502"
     },
     {
         "id": "Ubuntu",
@@ -270,6 +313,13 @@ task_list = [
         "description": "A visual reasoning dataset that tests abilities such as attribute identification, counting, comparison, spatial relationships, and logical operations. From Johnson et al. '16. Link: https://arxiv.org/abs/1612.06890"
     },
     {
+        "id": "nlvr",
+        "display_name": "nlvr",
+        "task": "nlvr",
+        "tags": [ "All",  "Visual" ],
+        "description": "Cornell Natural Language Visual Reasoning (NLVR) is a language grounding dataset based on  pairs of natural language statements grounded in synthetic images. From Suhr et al. '17. Link: http://lic.nlp.cornell.edu/nlvr/"
+    },
+    {
         "id": "WMT",
         "display_name": "WMT",
         "task": "wmt",
@@ -277,10 +327,60 @@ task_list = [
         "description": "Workshop on Machine Translation task, currently only includes en_de."
     },
     {
+        "id": "IWSLT14",
+        "display_name": "IWSLT14",
+        "task": "iwslt14",
+        "tags": ["All", "MT"],
+        "description": "2014 International Workshop on Spoken Language task, currently only includes en_de and de_en. From Cettolo et al. '12. Link: wit3.fbk.eu"
+    },
+    {
+        "id": "ConvAI2",
+        "display_name": "ConvAI2",
+        "task": "convai2",
+        "tags": [ "All", "ChitChat" ],
+        "description": "A chit-chat dataset based on PersonaChat (https://arxiv.org/abs/1801.07243) for a NIPS 2018 competition. Link: http://convai.io/."
+    },
+    {
         "id": "ConvAI_ChitChat",
         "display_name": "ConvAI_ChitChat",
         "task": "convai_chitchat",
         "tags": [ "All", "ChitChat" ],
         "description": "Human-bot dialogues containing free discussions of randomly chosen paragraphs from SQuAD. Link to dataset: http://convai.io/data/"
-    }
+    },
+    {
+        "id": "Dialogue_QE",
+        "display_name": "Dialogue_QE",
+        "task": "dialogue_qe",
+        "tags": [ "All" ],
+        "description": "Human-bot dialogues labelled for quality at the level of dialogues. Can be used to train dialogue-level metric for dialogue systems. Link to dataset: http://convai.io/data/"
+    },
+    {
+        "id": "SCAN",
+        "display_name": "SCAN",
+        "task": "scan",
+        "tags": [ "Goal", "All" ],
+        "description": "SCAN is a set of simple language-driven navigation tasks for studying compositional learning and zero-shot generalization. The SCAN tasks were inspired by the CommAI environment, which is the origin of the acronym (Simplified versions of the CommAI Navigation tasks). See the paper: https://arxiv.org/abs/1711.00350 or data: https://github.com/brendenlake/SCAN"
+    },
+    {
+        "id": "Persona-Chat",
+        "display_name": "Persona-Chat",
+        "task": "personachat",
+        "tags": [ "ChitChat", "All" ],
+        "description": "A chit-chat dataset where paired Turkers are given assigned personas and chat to try to get to know each other. See the paper: https://arxiv.org/abs/1801.07243"
+    },
+    {
+        "id": "Twitter",
+        "display_name": "Twitter",
+        "task": "twitter",
+        "tags": [ "All",  "ChitChat" ],
+        "description": "Twitter data from: https://github.com/Marsan-Ma/chat_corpus/. No train/valid/test split was provided so 10k for valid and 10k for test was chosen at random."
+    },
+    {
+        "id": "Wikipedia",
+        "display_name": "Wikipedia",
+        "task": 'wikipedia',
+        "tags": [ "All" ],
+        "description": "Dump of Wikipedia articles from 2/3/18",
+        "notes": "Specify ':full' for the full articles to be returned, otherwise defaults to ':summary', which provides the first paragraphs. To put the article in the labels and the title in the text, specify ':key-value' at the end (for a title/content key-value association)"
+    },
 ]

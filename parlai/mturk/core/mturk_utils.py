@@ -14,6 +14,7 @@ from botocore.exceptions import ProfileNotFound
 
 region_name = 'us-east-1'
 aws_profile_name = 'parlai_mturk'
+client = None
 
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 mturk_hit_frame_height = 650
@@ -78,7 +79,6 @@ def calculate_mturk_cost(payment_opt):
         'type': 'reward',
         'num_total_assignments': 1,
         'reward': 0.05  # in dollars
-        'unique': False # Unique workers requires multiple assignments to 1 HIT
     }
 
     Example payment_opt format for paying bonus:
@@ -90,8 +90,6 @@ def calculate_mturk_cost(payment_opt):
     total_cost = 0
     if payment_opt['type'] == 'reward':
         mult = 1.2
-        if payment_opt['unique'] and payment_opt['num_total_assignments'] > 10:
-            mult = 1.4
         total_cost = \
             payment_opt['num_total_assignments'] * payment_opt['reward'] * mult
     elif payment_opt['type'] == 'bonus':
@@ -104,15 +102,7 @@ def check_mturk_balance(balance_needed, is_sandbox):
     requester account, returns True if the balance is greater than
     balance_needed
     """
-    client = boto3.client(
-        service_name='mturk',
-        region_name='us-east-1',
-        endpoint_url='https://mturk-requester-sandbox.us-east-1.amazonaws.com'
-    )
-
-    # Region is always us-east-1
-    if not is_sandbox:
-        client = boto3.client(service_name='mturk', region_name='us-east-1')
+    client = get_mturk_client(is_sandbox)
 
     # Test that you can connect to the API by checking your account balance
     # In Sandbox this always returns $10,000
@@ -163,40 +153,35 @@ def create_hit_config(task_description, unique_worker, is_sandbox):
 
 def get_mturk_client(is_sandbox):
     """Returns the appropriate mturk client given sandbox option"""
-    client = boto3.client(
-        service_name='mturk',
-        region_name='us-east-1',
-        endpoint_url='https://mturk-requester-sandbox.us-east-1.amazonaws.com'
-    )
-    # Region is always us-east-1
-    if not is_sandbox:
-        client = boto3.client(service_name='mturk', region_name='us-east-1')
+    global client
+    if client is None:
+        client = boto3.client(
+            service_name='mturk',
+            region_name='us-east-1',
+            endpoint_url='https://mturk-requester-sandbox.us-east-1.amazonaws.com'
+        )
+        # Region is always us-east-1
+        if not is_sandbox:
+            client = \
+                boto3.client(service_name='mturk', region_name='us-east-1')
     return client
 
 
-def delete_qualification(qualification_id):
+def delete_qualification(qualification_id, is_sandbox):
     """Deletes a qualification by id"""
-    client = boto3.client(
-        service_name='mturk',
-        region_name='us-east-1',
-        endpoint_url='https://mturk-requester-sandbox.us-east-1.amazonaws.com'
-    )
+    client = get_mturk_client(is_sandbox)
     client.delete_qualification_type(
         QualificationTypeId=qualification_id
     )
 
 
-def find_qualification(qualification_name, must_be_owned=True):
+def find_qualification(qualification_name, is_sandbox, must_be_owned=True):
     """Query amazon to find the existing qualification name, return the Id,
     otherwise return none.
     If must_be_owned is true, it only returns qualifications owned by the user.
     Will return False if it finds another's qualification
     """
-    client = boto3.client(
-        service_name='mturk',
-        region_name='us-east-1',
-        endpoint_url='https://mturk-requester-sandbox.us-east-1.amazonaws.com'
-    )
+    client = get_mturk_client(is_sandbox)
 
     # Search for the qualification owned by the current user
     response = client.list_qualification_types(
@@ -229,7 +214,7 @@ def find_qualification(qualification_name, must_be_owned=True):
     return None
 
 
-def find_or_create_qualification(qualification_name, description,
+def find_or_create_qualification(qualification_name, description, is_sandbox,
                                  must_be_owned=True):
     """Query amazon to find the existing qualification name, return the Id. If
     it exists and must_be_owned is true but we don't own it, this prints an
@@ -237,6 +222,7 @@ def find_or_create_qualification(qualification_name, description,
     """
     qual_id = find_qualification(
         qualification_name,
+        is_sandbox,
         must_be_owned=must_be_owned
     )
 
@@ -246,11 +232,7 @@ def find_or_create_qualification(qualification_name, description,
         return qual_id
 
     # Create the qualification, as it doesn't exist yet
-    client = boto3.client(
-        service_name='mturk',
-        region_name='us-east-1',
-        endpoint_url='https://mturk-requester-sandbox.us-east-1.amazonaws.com'
-    )
+    client = get_mturk_client(is_sandbox)
     response = client.create_qualification_type(
         Name=qualification_name,
         Description=description,
@@ -259,25 +241,23 @@ def find_or_create_qualification(qualification_name, description,
     return response['QualificationType']['QualificationTypeId']
 
 
-def give_worker_qualification(worker_id, qualification_id, value=None):
+def give_worker_qualification(worker_id, qualification_id, value=None,
+                              is_sandbox=True):
     """Give a qualification to the given worker"""
-    client = boto3.client(
-        service_name='mturk',
-        region_name='us-east-1',
-        endpoint_url='https://mturk-requester-sandbox.us-east-1.amazonaws.com'
-    )
+    client = get_mturk_client(is_sandbox)
 
     if value is not None:
         client.associate_qualification_with_worker(
-            QualificationTypeId='string',
-            WorkerId='string',
+            QualificationTypeId=qualification_id,
+            WorkerId=worker_id,
             IntegerValue=value,
             SendNotification=False
         )
     else:
         client.associate_qualification_with_worker(
-            QualificationTypeId='string',
-            WorkerId='string',
+            QualificationTypeId=qualification_id,
+            WorkerId=worker_id,
+            IntegerValue=1,
             SendNotification=False
         )
 
@@ -286,15 +266,7 @@ def create_hit_type(hit_title, hit_description, hit_keywords, hit_reward,
                     assignment_duration_in_seconds, is_sandbox,
                     qualifications=None):
     """Create a HIT type to be used to generate HITs of the requested params"""
-    client = boto3.client(
-        service_name='mturk',
-        region_name='us-east-1',
-        endpoint_url='https://mturk-requester-sandbox.us-east-1.amazonaws.com'
-    )
-
-    # Region is always us-east-1
-    if not is_sandbox:
-        client = boto3.client(service_name='mturk', region_name='us-east-1')
+    client = get_mturk_client(is_sandbox)
 
     # Create a qualification with Locale In('US', 'CA') requirement attached
     localRequirements = [{
@@ -342,15 +314,7 @@ def create_hit_with_hit_type(page_url, hit_type_id, num_assignments,
         ''.format(amazon_ext_url, page_url, mturk_hit_frame_height)
     )
 
-    client = boto3.client(
-        service_name='mturk',
-        region_name='us-east-1',
-        endpoint_url='https://mturk-requester-sandbox.us-east-1.amazonaws.com'
-    )
-
-    # Region is always us-east-1
-    if not is_sandbox:
-        client = boto3.client(service_name='mturk', region_name='us-east-1')
+    client = get_mturk_client(is_sandbox)
 
     # Create the HIT
     response = client.create_hit_with_hit_type(
