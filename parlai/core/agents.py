@@ -74,6 +74,9 @@ class Agent(object):
     def getID(self):
         return self.id
 
+    def epoch_done(self):
+        return False
+
     def reset(self):
         self.observation = None
 
@@ -271,12 +274,24 @@ def name_to_agent_class(name):
     return class_name
 
 def load_agent_module(opt):
-    optfile =  opt['model_file'] + '.opt'
+    model_file = opt['model_file']
+    if model_file.startswith('models:'):
+        # load model from the ParlAI model zoo directory
+        model_file = os.path.join(opt['datapath'], 'models', model_file[7:])
+    optfile =  model_file + '.opt'
     if os.path.isfile(optfile):
         with open(optfile, 'rb') as handle:
-           opt = pickle.load(handle)
-        model_class = get_agent_module(opt['model'])
-        return model_class(opt)
+           new_opt = pickle.load(handle)
+        # only override opts specified in 'override' dict
+        if opt.get('override'):
+            for k in opt['override']:
+                v = opt[k]
+                print("[ warning: overriding opt['" + str(k) + "'] to " + str(v) +
+                      " (previously:" + str(str(new_opt.get(k, None))) + ") ]")
+                new_opt[k] = v
+        new_opt['model_file'] = model_file
+        model_class = get_agent_module(new_opt['model'])
+        return model_class(new_opt)
     else:
         return None
 
@@ -317,7 +332,7 @@ def create_agent(opt):
         if model is not None:
             return model
         else:
-            print("[ no model yet at: " + opt.get('model_file') + " ]")
+            print("[ no model with opt yet at: " + opt.get('model_file') + "(.opt) ]")
     if opt.get('model'):
         model_class = get_agent_module(opt['model'])
         return model_class(opt)

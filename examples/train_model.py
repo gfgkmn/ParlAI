@@ -47,9 +47,18 @@ def setup_args(model_args=None):
     train.add_argument('-ltim', '--log-every-n-secs',
                        type=float, default=2)
     train.add_argument('-vtim', '--validation-every-n-secs',
-                       type=float, default=-1)
+                       type=float, default=-1,
+                       help='Validate every n seconds. Whenever the the best '
+                            'validation metric is found, saves the model to '
+                            'the model_file path if set.')
     train.add_argument('-stim', '--save-every-n-secs',
-                       type=float, default=-1)
+                       type=float, default=-1,
+                       help='Saves the model to model_file.checkpoint after '
+                            'every n seconds (default -1, never).')
+    train.add_argument('-sval', '--save-after-valid', type='bool',
+                       default=False,
+                       help='Saves the model to model_file.checkpoint after '
+                            'every validation (default True).')
     train.add_argument('-vme', '--validation-max-exs',
                        type=int, default=-1,
                        help='max examples to use during validation (default '
@@ -61,6 +70,9 @@ def setup_args(model_args=None):
     train.add_argument('-vmt', '--validation-metric', default='accuracy',
                        help='key into report table for selecting best '
                             'validation')
+    train.add_argument('-vmm', '--validation-metric-mode', default='max',
+                       type=str, choices=['max', 'min'],
+                       help='how to optimize validation metric (max or min)')
     train.add_argument('-vcut', '--validation-cutoff',
                        type=float, default=1.0,
                        help='value at which training will stop if exceeded by '
@@ -68,6 +80,9 @@ def setup_args(model_args=None):
     train.add_argument('-dbf', '--dict-build-first',
                        type='bool', default=True,
                        help='build dictionary first before training agent')
+    train.add_argument('-lfc', '--load-from-checkpoint',
+                       type='bool', default=False,
+                       help='load model from checkpoint if available')
     return parser
 
 def run_eval(agent, opt, datatype, max_exs=-1, write_log=False, valid_world=None):
@@ -88,8 +103,7 @@ def run_eval(agent, opt, datatype, max_exs=-1, write_log=False, valid_world=None
 
     if valid_world is None:
         valid_world = create_task(opt, agent)
-    else:
-        valid_world.reset()
+    valid_world.reset()
     cnt = 0
     while not valid_world.epoch_done():
         valid_world.parley()
@@ -102,13 +116,14 @@ def run_eval(agent, opt, datatype, max_exs=-1, write_log=False, valid_world=None
             # full depending on the structure of the data
             break
     valid_report = valid_world.report()
+    valid_world.reset()  # this makes sure agent doesn't remember valid data
 
     metrics = datatype + ':' + str(valid_report)
     print(metrics)
     data_logger.info(metrics)
     if still_training:
         return valid_report
-    elif write_log and opt['model_file']:
+    elif write_log and opt.get('model_file'):
         # Write out metrics
         f = open(opt['model_file'] + '.' + datatype, 'a+')
         f.write(metrics + '\n')
@@ -116,9 +131,18 @@ def run_eval(agent, opt, datatype, max_exs=-1, write_log=False, valid_world=None
 
     return valid_report, valid_world
 
+def save_best_valid(model_file, best_valid):
+    f = open(model_file + '.best_valid', 'w')
+    f.write(str(best_valid))
+    f.close()
+
+
 class TrainLoop():
     def __init__(self, parser):
         opt = parser.parse_args()
+        # Possibly load from checkpoint
+        if opt['load_from_checkpoint'] and opt.get('model_file') and os.path.isfile(opt['model_file'] + '.checkpoint'):
+            opt['init_model'] = opt['model_file'] + '.checkpoint'
         # Possibly build a dictionary (not all models do this).
         if opt['dict_build_first'] and 'dict_file' in opt:
             if opt['dict_file'] is None and opt.get('model_file'):
@@ -139,7 +163,13 @@ class TrainLoop():
         self.log_every_n_secs = opt['log_every_n_secs'] if opt['log_every_n_secs'] > 0 else float('inf')
         self.val_every_n_secs = opt['validation_every_n_secs'] if opt['validation_every_n_secs'] > 0 else float('inf')
         self.save_every_n_secs = opt['save_every_n_secs'] if opt['save_every_n_secs'] > 0 else float('inf')
-        self.best_valid = 0
+        self.valid_optim = 1 if opt['validation_metric_mode'] == 'max' else -1
+        self.best_valid = None
+        if opt.get('model_file') and os.path.isfile(opt['model_file'] + '.best_valid'):
+            with open(opt['model_file'] + ".best_valid", 'r') as f:
+                x = f.readline()
+                self.best_valid = float(x)
+                f.close()
         self.impatience = 0
         self.saved = False
         self.valid_world = None
@@ -150,13 +180,25 @@ class TrainLoop():
         valid_report, self.valid_world = run_eval(
             self.agent, opt, 'valid', opt['validation_max_exs'],
             valid_world=self.valid_world)
-        if valid_report[opt['validation_metric']] > self.best_valid:
-            self.best_valid = valid_report[opt['validation_metric']]
+        if opt.get('model_file') and opt.get('save_after_valid'):
+            print("[ saving model checkpoint: " + opt['model_file'] + ".checkpoint ]")
+            self.agent.save(opt['model_file'] + '.checkpoint')
+        if hasattr(self.agent, 'receive_metrics'):
+            self.agent.receive_metrics(valid_report)
+        new_valid = valid_report[opt['validation_metric']]
+        if self.best_valid is None or self.valid_optim * new_valid > self.valid_optim * self.best_valid:
+            print('[ new best {}: {}{} ]'.format(
+                opt['validation_metric'], new_valid,
+                ' (previous best was {})'.format(self.best_valid)
+                    if self.best_valid is not None else ''))
+            self.best_valid = new_valid
             self.impatience = 0
-            print('[ new best {}: {} ]'.format(
-                opt['validation_metric'], self.best_valid))
-            self.world.save_agents()
-            self.saved = True
+            if opt.get('model_file'):
+                print("[ saving best valid model: " + opt['model_file'] + " ]")
+                self.agent.save(opt['model_file'])
+                print("[ saving best valid metric: " + opt['model_file'] + ".best_valid ]")
+                save_best_valid(opt['model_file'], self.best_valid)
+                self.saved = True
             if opt['validation_metric'] == 'accuracy' and self.best_valid >= opt['validation_cutoff']:
                 print('[ task solved! stopping. ]')
                 return True
@@ -177,12 +219,8 @@ class TrainLoop():
             print(self.world.display() + '\n~~')
         logs = []
         # get report
-        if hasattr(self.agent, 'report'):
-            train_report = self.agent.report()
-            self.agent.reset_metrics()
-        else:
-            train_report = self.world.report(compute_time=True)
-            self.world.reset_metrics()
+        train_report = self.world.report(compute_time=True)
+        self.world.reset_metrics()
 
         # time elapsed
         logs.append('time:{}s'.format(math.floor(self.train_time.time())))
@@ -220,14 +258,14 @@ class TrainLoop():
                     stop_training = self.validate()
                     if stop_training:
                         break
-                if self.save_time.time() > self.save_every_n_secs:
-                    print("[ saving model: " + opt['model_file'] + " ]")
-                    world.save_agents()
+                if self.save_time.time() > self.save_every_n_secs and opt.get('model_file'):
+                    print("[ saving model checkpoint: " + opt['model_file'] + ".checkpoint ]")
+                    self.agent.save(opt['model_file'] + '.checkpoint')
                     self.save_time.reset()
 
         if not self.saved:
             # save agent
-            world.save_agents()
+            self.agent.save(opt['model_file'])
         elif opt.get('model_file'):
             # reload best validation model
             self.agent = create_agent(opt)

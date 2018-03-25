@@ -22,7 +22,6 @@ class Seq2seq(nn.Module):
         self.opt = opt
 
         self.rank = opt['rank_candidates']
-        self.lm = opt['language_model']
         self.attn_type = opt['attention']
 
         self.NULL_IDX = padding_idx
@@ -36,7 +35,9 @@ class Seq2seq(nn.Module):
             emb_size=opt['embeddingsize'], hidden_size=opt['hiddensize'],
             num_layers=opt['numlayers'], dropout=opt['dropout'],
             share_output=opt['lookuptable'] in ['dec_out', 'all'],
-            attn_type=opt['attention'], attn_length=opt['attention_length'])
+            attn_type=opt['attention'], attn_length=opt['attention_length'],
+            attn_time=opt.get('attention_time'),
+            bidir_input=opt['bidirectional'])
 
         shared_lt = (self.decoder.lt
                      if opt['lookuptable'] in ['enc_dec', 'all'] else None)
@@ -67,7 +68,7 @@ class Seq2seq(nn.Module):
         predictions = []
         scores = []
         text_cand_inds = None
-        if self.training:
+        if ys is not None:
             y_in = ys.narrow(1, 0, ys.size(1) - 1)
             xs = torch.cat([starts, y_in], 1)
             if self.attn_type == 'none':
@@ -77,7 +78,7 @@ class Seq2seq(nn.Module):
             else:
                 for i in range(ys.size(1)):
                     xi = xs.select(1, i)
-                    preds, score, _h = self.decoder(xi, hidden, enc_out, attn_mask)
+                    preds, score, hidden = self.decoder(xi, hidden, enc_out, attn_mask)
                     predictions.append(preds)
                     scores.append(score)
         else:
@@ -118,7 +119,8 @@ class Seq2seq(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, num_features, padding_idx=0, rnn_class='lstm',
                  emb_size=128, hidden_size=128, num_layers=2, dropout=0.1,
-                 bidirectional=False, shared_lt=None, shared_rnn=None):
+                 bidirectional=False, shared_lt=None, shared_rnn=None,
+                 sparse=False):
         super().__init__()
 
         self.dropout = dropout
@@ -131,7 +133,8 @@ class Encoder(nn.Module):
 
         if shared_lt is None:
             self.lt = nn.Embedding(num_features, emb_size,
-                                   padding_idx=padding_idx)
+                                   padding_idx=padding_idx,
+                                   sparse=sparse)
         else:
             self.lt = shared_lt
 
@@ -166,14 +169,16 @@ class Encoder(nn.Module):
 
         if type(self.rnn) == nn.LSTM:
             encoder_output_packed, hidden = self.rnn(xes_packed, (h0, h0))
-            # take elementwise max between forward and backward hidden states
-            hidden = (hidden[0].view(-1, self.dirs, bsz, self.hsz).max(1)[0],
-                      hidden[1].view(-1, self.dirs, bsz, self.hsz).max(1)[0])
+            if self.dirs > 1:
+                # take elementwise max between forward and backward hidden states
+                hidden = (hidden[0].view(-1, self.dirs, bsz, self.hsz).max(1)[0],
+                          hidden[1].view(-1, self.dirs, bsz, self.hsz).max(1)[0])
         else:
             encoder_output_packed, hidden = self.rnn(xes_packed, h0)
 
-            # take elementwise max between forward and backward hidden states
-            hidden = hidden.view(-1, self.dirs, bsz, self.hsz).max(1)[0]
+            if self.dirs > 1:
+                # take elementwise max between forward and backward hidden states
+                hidden = hidden.view(-1, self.dirs, bsz, self.hsz).max(1)[0]
         encoder_output, _ = pad_packed_sequence(encoder_output_packed,
                                                 batch_first=True)
         return encoder_output, hidden
@@ -183,7 +188,8 @@ class Decoder(nn.Module):
     def __init__(self, num_features, padding_idx=0, rnn_class='lstm',
                  emb_size=128, hidden_size=128, num_layers=2, dropout=0.1,
                  bidir_input=False, share_output=True,
-                 attn_type='none', attn_length=-1):
+                 attn_type='none', attn_length=-1, attn_time='pre',
+                 sparse=False):
         super().__init__()
 
         if padding_idx != 0:
@@ -194,12 +200,19 @@ class Decoder(nn.Module):
         self.layers = num_layers
         self.hsz = hidden_size
 
-        self.lt = nn.Embedding(num_features, emb_size, padding_idx=padding_idx)
+        self.lt = nn.Embedding(num_features, emb_size, padding_idx=padding_idx,
+                               sparse=sparse)
         self.rnn = rnn_class(emb_size, hidden_size, num_layers,
                              dropout=dropout, batch_first=True)
 
         # rnn output to embedding
-        self.o2e = nn.Linear(hidden_size, emb_size)
+        if hidden_size != emb_size:
+            self.o2e = RandomProjection(hidden_size, emb_size)
+            # other option here is to learn these weights
+            # self.o2e = nn.Linear(hidden_size, emb_size, bias=False)
+        else:
+            # no need for any transformation here
+            self.o2e = lambda x: x
         # embedding to scores, use custom linear to possibly share weights
         shared_weight = self.lt.weight if share_output else None
         self.e2s = Linear(emb_size, num_features, bias=False,
@@ -207,26 +220,32 @@ class Decoder(nn.Module):
         self.shared = shared_weight is not None
 
         self.attn_type = attn_type
+        self.attn_time = attn_time
         self.attention = AttentionLayer(attn_type=attn_type,
                                         hidden_size=hidden_size,
                                         emb_size=emb_size,
                                         bidirectional=bidir_input,
-                                        attn_length=attn_length)
+                                        attn_length=attn_length,
+                                        attn_time=attn_time)
 
     def forward(self, xs, hidden, encoder_output, attn_mask=None):
         xes = F.dropout(self.lt(xs), p=self.dropout, training=self.training)
-        xes = self.attention(xes, hidden, encoder_output, attn_mask)
-        output, hidden = self.rnn(xes, hidden)
-        # TODO: add post-attention?
-        # output = self.attention(output, hidden, encoder_output, attn_mask)
+        if self.attn_time == 'pre':
+            xes = self.attention(xes, hidden, encoder_output, attn_mask)
+        if xes.dim() == 2:
+            # if only one token inputted, sometimes needs unsquezing
+            xes.unsqueeze_(1)
+        output, new_hidden = self.rnn(xes, hidden)
+        if self.attn_time == 'post':
+            output = self.attention(output, new_hidden, encoder_output, attn_mask)
 
-        e = F.dropout(self.o2e(output), p=self.dropout, training=self.training)
+        e = self.o2e(output)
         scores = F.dropout(self.e2s(e), p=self.dropout, training=self.training)
         # select top scoring index, excluding the padding symbol (at idx zero)
         _max_score, idx = scores.narrow(2, 1, scores.size(2) - 1).max(2)
         preds = idx.add_(1)
 
-        return preds, scores, hidden
+        return preds, scores, new_hidden
 
 
 class Ranker(nn.Module):
@@ -297,7 +316,7 @@ class Ranker(nn.Module):
             if cview.size(1) > 1:
                 # feed in START + cands[:-2]
                 cands_in = cview.narrow(1, 0, cview.size(1) - 1)
-                starts = torch.cat([starts, self.dec_lt(cands_in)], 1)
+                starts = torch.cat([starts, cands_in], 1)
             _preds, score, _h = self.decoder(starts, cands_hn, enc_out, attn_mask)
 
             for i in range(cview.size(1)):
@@ -354,6 +373,9 @@ class Ranker(nn.Module):
 
 
 class Linear(nn.Module):
+    """Custom Linear layer which allows for sharing weights (e.g. with an
+    nn.Embedding layer).
+    """
     def __init__(self, in_features, out_features, bias=True,
                  shared_weight=None):
         super().__init__()
@@ -386,9 +408,10 @@ class Linear(nn.Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input):
-        # detach weight to prevent gradients from changing weight when shared
         weight = self.weight
         if self.shared:
+            # detach weight to prevent gradients from changing weight
+            # (but need to detach every time so weights are up to date)
             weight = weight.detach()
         return F.linear(input, weight, self.bias)
 
@@ -398,9 +421,28 @@ class Linear(nn.Module):
             + str(self.out_features) + ')'
 
 
+class RandomProjection(nn.Module):
+    def __init__(self, in_features, out_features):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = Parameter(torch.Tensor(out_features, in_features),
+                                requires_grad=False)  # fix weights
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        # experimentally: std=1 appears to affect scale too much
+        self.weight.data.normal_(std=0.1)
+        # other init option: set randomly to 1 or -1
+        # self.weight.data.bernoulli_(self.weight.fill_(0.5)).mul_(2).sub_(1)
+
+    def forward(self, input):
+        return F.linear(input, self.weight)
+
+
 class AttentionLayer(nn.Module):
     def __init__(self, attn_type, hidden_size, emb_size, bidirectional=False,
-                 attn_length=-1):
+                 attn_length=-1, attn_time='pre'):
         super().__init__()
         self.attention = attn_type
 
@@ -408,7 +450,15 @@ class AttentionLayer(nn.Module):
             hsz = hidden_size
             num_dirs = 2 if bidirectional else 1
             hszXdirs = hsz * num_dirs
-            self.attn_combine = nn.Linear(hszXdirs + emb_size, emb_size,
+            if attn_time == 'pre':
+                # attention happens on the input embeddings
+                input_dim = emb_size
+            elif attn_time == 'post':
+                # attention happens on the output of the rnn
+                input_dim = hsz
+            else:
+                raise RuntimeError('unsupported attention time')
+            self.attn_combine = nn.Linear(hszXdirs + input_dim, input_dim,
                                           bias=False)
 
             if self.attention == 'local':
@@ -453,6 +503,9 @@ class AttentionLayer(nn.Module):
                 active = F.tanh(self.attn(h_merged))
                 attn_w_premask = self.attn_v(active).squeeze(2)
             elif self.attention == 'dot':
+                if hid.size(2) != enc_out.size(2):
+                    # enc_out has two directions, so double hid
+                    hid = torch.cat([hid, hid], 2)
                 attn_w_premask = (
                     torch.bmm(hid, enc_out.transpose(1, 2)).squeeze(1))
             elif self.attention == 'general':

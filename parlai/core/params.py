@@ -75,6 +75,9 @@ class ParlaiParser(argparse.ArgumentParser):
         self.add_arg = self.add_argument
         # function reassignment
 
+        # remember which args were specified on the command line
+        self.cli_args = sys.argv
+
         if add_parlai_args:
             self.add_parlai_args(model_argv)
             self.add_image_args()
@@ -106,6 +109,10 @@ class ParlaiParser(argparse.ArgumentParser):
             '--unique', dest='unique_worker', default=False,
             action='store_true',
             help='enforce that no worker can work on your task twice')
+        mturk.add_argument(
+            '--unique-qual-name', dest='unique_qual_name',
+            default=None, type=str,
+            help='qualification name to use for uniqueness between HITs')
         mturk.add_argument(
             '-r', '--reward', default=0.05, type=float,
             help='reward for each worker for finishing the conversation, '
@@ -146,10 +153,46 @@ class ParlaiParser(argparse.ArgumentParser):
             default=0, type=int,
             help='number of concurrent conversations that one mturk worker '
                  'is able to be involved in, 0 is unlimited')
+        mturk.add_argument(
+            '--max-connections', dest='max_connections',
+            default=30, type=int,
+            help='number of HITs that can be launched at the same time, 0 is '
+                 'unlimited.'
+        )
+        mturk.add_argument(
+            '--min-messages', dest='min_messages',
+            default=0, type=int,
+            help='number of messages required to be sent by MTurk agent when '
+                 'considering whether to approve a HIT in the event of a '
+                 'partner disconnect. I.e. if the number of messages '
+                 'exceeds this number, the turker can submit the HIT.'
+        )
 
         mturk.set_defaults(is_sandbox=True)
         mturk.set_defaults(is_debug=False)
         mturk.set_defaults(verbose=False)
+
+    def add_messenger_args(self):
+        messenger = self.add_argument_group('Facebook Messenger')
+        messenger.add_argument(
+            '--debug', dest='is_debug', action='store_true',
+            help='print and log all server interactions and messages')
+        messenger.add_argument(
+            '--verbose', dest='verbose', action='store_true',
+            help='print all messages sent to and from Turkers')
+        messenger.add_argument(
+            '--log-level', dest='log_level', type=int, default=20,
+            help='importance level for what to put into the logs. the lower '
+                 'the level the more that gets logged. values are 0-50')
+        messenger.add_argument(
+            '--force-page-token', dest='force_page_token', action='store_true',
+            help='override the page token stored in the cache for a new one')
+        messenger.add_argument(
+            '--password', dest='password', type=str, default=None,
+            help='Require a password for entry to the bot')
+
+        messenger.set_defaults(is_debug=False)
+        messenger.set_defaults(verbose=False)
 
     def add_parlai_args(self, args=None):
         default_downloads_path = os.path.join(self.parlai_home, 'downloads')
@@ -275,13 +318,19 @@ class ParlaiParser(argparse.ArgumentParser):
             # hide batch options
             self.opt.pop('batch_sort', None)
             self.opt.pop('context_length', None)
-            self.opt.pop('include_labels', None)
 
         # set environment variables
         if self.opt.get('download_path'):
             os.environ['PARLAI_DOWNPATH'] = self.opt['download_path']
         if self.opt.get('datapath'):
             os.environ['PARLAI_DATAPATH'] = self.opt['datapath']
+
+        # set all arguments specified in commandline as overridable
+        override = {}
+        for k, v in self.opt.items():
+            if v in self.cli_args:
+                override[k] = v
+        self.opt['override'] = override
 
         if print_args:
             self.print_args()

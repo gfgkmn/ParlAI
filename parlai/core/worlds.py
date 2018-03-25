@@ -77,7 +77,8 @@ def display_messages(msgs):
         space = ''
         if len(msgs) == 2 and index == 1:
             space = '   '
-        if msg.get('reward', None) is not None:
+        # Only display rewards !=0 as they are confusing in non-RL tasks.
+        if msg.get('reward', 0) != 0:
             lines.append(space + '[reward: {r}]'.format(r=msg['reward']))
         if type(msg.get('image')) == str:
             lines.append(msg['image'])
@@ -234,13 +235,6 @@ class World(object):
         for a in self.agents:
             a.reset_metrics()
 
-    def save_agents(self):
-        """Saves all of the agents in the world by calling their respective
-        save() methods.
-        """
-        for a in self.agents:
-            a.save()
-
     def shutdown(self):
         """Perform any cleanup, if appropriate."""
         pass
@@ -302,13 +296,20 @@ class DialogPartnerWorld(World):
 
     def epoch_done(self):
         """Only the first agent indicates when the epoch is done."""
-        return (self.agents[0].epoch_done()
-                if hasattr(self.agents[0], 'epoch_done') else False)
+        return self.agents[0].epoch_done()
 
     def report(self, compute_time=False):
-        if hasattr(self.agents[0], 'report'):
-            metrics = self.agents[0].report()
-            if compute_time:
+        metrics = {}
+        for a in self.agents:
+            if hasattr(a, 'report'):
+                m = a.report()
+                for k, v in m.items():
+                    if k not in metrics:
+                        # first agent gets priority in settings values for keys
+                        # this way model can't e.g. override accuracy to 100%
+                        metrics[k] = v
+        if metrics:
+            if compute_time and 'total' in metrics:
                 self.total_exs += metrics['total']
                 time_metrics = compute_time_metrics(self, self.opt['max_train_time'])
                 metrics.update(time_metrics)
@@ -331,7 +332,7 @@ class MultiAgentDialogWorld(World):
     receiving as input the actions of all other agents since that agent last
     acted.
     """
-    def __init__(self, opt, agents=None, shared=None):
+    def __init__(self, opt, agents, shared=None):
         super().__init__(opt)
         if shared:
             # Create agents based on shared data.
@@ -339,8 +340,7 @@ class MultiAgentDialogWorld(World):
         else:
             # Add passed in agents directly.
             self.agents = agents
-            self.acts = [None] * len(agents)
-        super().__init__(opt, agents, shared)
+        self.acts = [None] * len(self.agents)
 
     def parley(self):
         """For each agent, get an observation of the last action each of the
@@ -369,12 +369,21 @@ class MultiAgentDialogWorld(World):
         return done
 
     def report(self, compute_time=False):
-        metrics = self.agents[0].report()
-        if compute_time:
-            self.total_exs += metrics['total']
-            time_metrics = compute_time_metrics(self, self.opt['max_train_time'])
-            metrics.update(time_metrics)
-        return metrics
+        metrics = {}
+        for a in self.agents:
+            if hasattr(a, 'report'):
+                m = a.report()
+                for k, v in m.items():
+                    if k not in metrics:
+                        # first agent gets priority in settings values for keys
+                        # this way model can't e.g. override accuracy to 100%
+                        metrics[k] = v
+        if metrics:
+            if compute_time and 'total' in metrics:
+                self.total_exs += metrics['total']
+                time_metrics = compute_time_metrics(self, self.opt['max_train_time'])
+                metrics.update(time_metrics)
+            return metrics
 
     def shutdown(self):
         """Shutdown each agent."""
@@ -565,9 +574,13 @@ def override_opts_in_shared(table, overrides):
         if type(v) == dict and k != 'opt':
             override_opts_in_shared(v, overrides)
         elif type(v) == list:
-            for item in v[:1]:  # don't actually want to iterate over all items
+            for item in v:
                 if type(item) == dict:
+                    # if this is a list of agent shared dicts, we want to iterate
                     override_opts_in_shared(item, overrides)
+                else:
+                    # if this is e.g. list of candidate strings, stop right away
+                    break
     return table
 
 
@@ -893,10 +906,16 @@ class HogwildWorld(World):
 
 ### Functions for creating tasks/worlds given options.
 
-def _get_task_world(opt):
+def _get_task_world(opt, user_agents):
+    task_agents = _create_task_agents(opt)
     sp = opt['task'].strip().split(':')
     if '.' in sp[0]:
-        world_class = DialogPartnerWorld
+        # The case of opt['task'] = 'parlai.tasks.squad.agents:DefaultTeacher'
+        # (i.e. specifying your own path directly, assumes DialogPartnerWorld)
+        if len(task_agents + user_agents) == 2:
+            world_class = DialogPartnerWorld
+        else:
+            world_class = MultiAgentDialogWorld
     else:
         task = sp[0].lower()
         if len(sp) > 1:
@@ -912,8 +931,10 @@ def _get_task_world(opt):
             # so in your task, you also should implement world.py
             # if you task have special world.
             # Defaults to this if you did not specify a world for your task.
-            world_class = DialogPartnerWorld
-    task_agents = _create_task_agents(opt)
+            if len(task_agents + user_agents) == 2:
+                world_class = DialogPartnerWorld
+            else:
+                world_class = MultiAgentDialogWorld
     # for drqa examples build_dict step.
     # return DialogPartnerWorld as world_class
     # and DefaultTeacher as task_agents
@@ -924,7 +945,7 @@ def _get_task_world(opt):
 
 
 def create_task_world(opt, user_agents):
-    world_class, task_agents = _get_task_world(opt)
+    world_class, task_agents = _get_task_world(opt, user_agents)
     # when use drqa example, in build_dictionary step user_agents = 
     # ['parlai.agents.drqa.drqa:SimpleDictionaryAgent']
     # DialogPartnerWorld(opt, DefaultTeacher + SimpleDictionaryAgent)

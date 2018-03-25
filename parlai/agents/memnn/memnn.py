@@ -6,6 +6,7 @@
 
 from parlai.core.agents import Agent
 from parlai.core.dict import DictionaryAgent
+from parlai.core.utils import maintain_dialog_history
 
 import torch
 from torch import optim
@@ -27,6 +28,8 @@ class MemnnAgent(Agent):
     def add_cmdline_args(argparser):
         DictionaryAgent.add_cmdline_args(argparser)
         arg_group = argparser.add_argument_group('MemNN Arguments')
+        arg_group.add_argument('--init-model', type=str, default=None,
+            help='load dict/features/weights/opts from this file')
         arg_group.add_argument('-lr', '--learning-rate', type=float, default=0.01,
             help='learning rate')
         arg_group.add_argument('--embedding-size', type=int, default=128,
@@ -51,6 +54,9 @@ class MemnnAgent(Agent):
             help='disable GPUs even if available')
         arg_group.add_argument('--gpu', type=int, default=-1,
             help='which GPU device to use')
+        arg_group.add_argument('-histr', '--history-replies', default='label', type=str,
+            choices=['none', 'model', 'label'],
+            help='Keep replies in the history, or not.')
 
     def __init__(self, opt, shared=None):
         opt['cuda'] = not opt['no_cuda'] and torch.cuda.is_available()
@@ -59,24 +65,42 @@ class MemnnAgent(Agent):
             torch.cuda.device(opt['gpu'])
 
         if not shared:
-            self.opt = opt
             self.id = 'MemNN'
             self.dict = DictionaryAgent(opt)
             self.answers = [None] * opt['batchsize']
-
             self.model = MemNN(opt, len(self.dict))
+
+        else:
+            self.dict = shared['dict']
+            # model is shared during hogwild
+            if 'threadindex' in shared:
+                self.model = shared['model']
+                self.decoder = shared['decoder']
+                self.answers = [None] * opt['batchsize']
+            else:
+                self.answers = shared['answers']
+
+        if hasattr(self, 'model'):
+            self.opt = opt
             self.mem_size = opt['mem_size']
             self.loss_fn = CrossEntropyLoss()
 
             self.decoder = None
             self.longest_label = 1
+            self.NULL_IDX = self.dict[self.dict.null_token]
             self.END = self.dict.end_token
-            self.END_TENSOR = torch.LongTensor(self.dict.parse(self.END))
+            self.END_TENSOR = torch.LongTensor(self.dict[self.END])
             self.START = self.dict.start_token
-            self.START_TENSOR = torch.LongTensor(self.dict.parse(self.START))
+            self.START_TENSOR = torch.LongTensor(self.dict[self.START])
+
             if opt['output'] == 'generate' or opt['output'] == 'g':
                 self.decoder = Decoder(opt['embedding_size'], opt['embedding_size'],
                                         opt['rnn_layers'], opt, self.dict)
+            if opt['cuda'] and not shared:
+                self.model.share_memory()
+                if self.decoder is not None:
+                    self.decoder.cuda()
+
             elif opt['output'] != 'rank' and opt['output'] != 'r':
                 raise NotImplementedError('Output type not supported.')
 
@@ -93,17 +117,19 @@ class MemnnAgent(Agent):
             else:
                 raise NotImplementedError('Optimizer not supported.')
 
-            if opt['cuda']:
-                self.model.share_memory()
-                if self.decoder is not None:
-                    self.decoder.cuda()
+            # check first for 'init_model' for loading model from file
+            if opt.get('init_model') and os.path.isfile(opt['init_model']):
+                init_model = opt['init_model']
+            # next check for 'model_file'
+            elif opt.get('model_file') and os.path.isfile(opt['model_file']):
+                init_model = opt['model_file']
+            else:
+                init_model = None
+            if init_model is not None:
+                print('Loading existing model parameters from ' + init_model)
+                self.load(init_model)
 
-            if opt.get('model_file') and os.path.isfile(opt['model_file']):
-                print('Loading existing model parameters from ' + opt['model_file'])
-                self.load(opt['model_file'])
-        else:
-            self.answers = shared['answers']
-
+        self.history = {}
         self.episode_done = True
         self.last_cands, self.last_cands_list = None, None
         super().__init__(opt, shared)
@@ -111,22 +137,32 @@ class MemnnAgent(Agent):
     def share(self):
         shared = super().share()
         shared['answers'] = self.answers
+        shared['dict'] = self.dict
+        if self.opt.get('numthreads', 1) > 1:
+            shared['model'] = self.model
+            self.model.share_memory()
+            shared['decoder'] = self.decoder
         return shared
 
     def observe(self, observation):
-        observation = copy.copy(observation)
-        if not self.episode_done and not observation.get('preprocessed', False):
-            # if the last example wasn't the end of an episode, then we need to
-            # recall what was said in that example
-            prev_dialogue = self.observation['text'] if self.observation is not None else ''
-            batch_idx = self.opt.get('batchindex', 0)
-            if self.answers[batch_idx] is not None:
-                prev_dialogue += '\n' + self.answers[batch_idx]
-                self.answers[batch_idx] = None
-            observation['text'] = prev_dialogue + '\n' + observation['text']
-        self.observation = observation
+        """Save observation for act.
+        If multiple observations are from the same episode, concatenate them.
+        """
         self.episode_done = observation['episode_done']
-        return observation
+        # shallow copy observation (deep copy can be expensive)
+        obs = observation.copy()
+        batch_idx = self.opt.get('batchindex', 0)
+
+        obs['text'] = (maintain_dialog_history(
+        self.history, obs,
+        reply=self.answers[batch_idx] if self.answers[batch_idx] is not None else '',
+        historyLength=self.opt['mem_size'] + 1,
+        useReplies=self.opt['history_replies'],
+        dict=self.dict, useStartEndIndices=False, splitSentences=True))
+
+        self.observation = obs
+        self.answers[batch_idx] = None
+        return obs
 
     def predict(self, xs, cands, ys=None):
         is_training = ys is not None
@@ -229,29 +265,20 @@ class MemnnAgent(Agent):
         return [[' '.join(c for c in o if c != self.END
                         and c != self.dict.null_token)] for o in output_lines]
 
-    def parse(self, text):
+    def parse(self, memory):
         """Returns:
             query = tensor (vector) of token indices for query
             query_length = length of query
             memory = tensor (matrix) where each row contains token indices for a memory
             memory_lengths = tensor (vector) with lengths of each memory
         """
-        sp = text.split('\n')
-        query_sentence = sp[-1]
-        query = self.dict.txt2vec(query_sentence)
+        query = memory.pop()
         query = torch.LongTensor(query)
         query_length = torch.LongTensor([len(query)])
 
-        sp = sp[:-1]
-        sentences = []
-        for s in sp:
-            sentences.extend(s.split('\t'))
-        if len(sentences) == 0:
-            sentences.append(self.dict.null_token)
+        if len(memory) == 0:
+            memory.append([self.NULL_IDX])
 
-        num_mems = min(self.mem_size, len(sentences))
-        memory_sentences = sentences[-num_mems:]
-        memory = [self.dict.txt2vec(s) for s in memory_sentences]
         memory = [torch.LongTensor(m) for m in memory]
         memory_lengths = torch.LongTensor([len(m) for m in memory])
         memory = torch.cat(memory)
@@ -264,8 +291,8 @@ class MemnnAgent(Agent):
             cands = list of candidates for each example in batch
             valid_inds = list of indices for examples with valid observations
         """
-        exs = [ex for ex in obs if 'text' in ex]
-        valid_inds = [i for i, ex in enumerate(obs) if 'text' in ex]
+        exs = [ex for ex in obs if 'text' in ex and len(ex['text']) > 0]
+        valid_inds = [i for i, ex in enumerate(obs) if 'text' in ex and len(ex['text']) > 0]
         if not exs:
             return [None] * 4
 

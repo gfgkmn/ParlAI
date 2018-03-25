@@ -33,6 +33,7 @@ We provide a few examples of using Mechanical Turk with ParlAI:
 - `Model Evaluator <https://github.com/facebookresearch/ParlAI/blob/master/parlai/mturk/tasks/model_evaluator/>`__: ask Turkers to evaluate the information retrieval baseline model on the Reddit movie dialog dataset.
 - `Multi-Agent Dialog <https://github.com/facebookresearch/ParlAI/blob/master/parlai/mturk/tasks/multi_agent_dialog/>`__: round-robin chat between a local human agent and two Turkers.
 - `Deal or No Deal <https://github.com/facebookresearch/ParlAI/tree/master/parlai/mturk/tasks/dealnodeal/>`__: negotiation chat between two agents over how to fairly divide a fixed set of items when each agent values the items differently.
+- `Qualification Flow Example <https://github.com/facebookresearch/ParlAI/tree/master/parlai/mturk/tasks/qualification_flow_example>`__: filter out workers from working on more instances of your task if they fail to complete a test instance properly.
 
 Task 1: Collecting Data
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -83,6 +84,13 @@ ParlAI is able to support more than just generic chat. The `Deal or No Deal task
 This task leverages the ability to override base functionality of the core.html page using ``task_config.py``. Javascript is added here to replace the task description with additional buttons and UI elements that are required for the more complicated task. These trigger within an overridden handle_new_message function, which will only fire after an agent has entered the chat.
 In general it is easier/preferred to use a custom webpage as described in step 4 of "Creating Your Own Task", though this is an alternate that can be used if you specifically only want to show additional components in the task description pane of the chat window.
 
+Task 5: Advanced Functionality - MTurk Qualification Flow
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ParlAI MTurk is able to support filtering users through a form of qualification system. The `Qualification Flow task <https://github.com/facebookresearch/ParlAI/tree/master/parlai/mturk/tasks/qualification_flow_example>`__ demos this functionality using a simple "addition" task.
+
+In this task, all users see a test version of the task on the first time they enter it and a real version every subsequent time, however users that fail to pass the test version are assigned a qualification that prevents them from working on the task again. Thus ParlAI users are able to filter out workers from the very beginning who don't necessarily meet the specifications you are going for.
+This is preferred to filtering out workers using the onboarding world for tasks that require a full instance's worth of work to verify a worker's readiness.
 
 Creating Your Own Task
 ----------------------
@@ -91,11 +99,10 @@ ParlAI provides a generic MTurk dialog interface that one can use to implement a
 
 A few things to keep in mind:
 
-1. To end a conversation, you should send a message with ``episode_done = True`` from the first non-MTurk agent, and the conversation is ended after all MTurk agents respond.
+1. To end a conversation, you should check to see if an action has ``episode_done`` set to ``True``, as this signals that the world should start returning ``True`` for the ``episode_done`` function.
 2. In ``run.py``, You can use ``hit_index`` and ``assignment_index`` to differentiate between different HITs and assignments, and change the content of the task accordingly.
 3. Make sure to test your dialog task using MTurk's sandbox mode before pushing it live, by using the ``--sandbox`` flag (enabled by default) when running ``run.py``.
-4. [Optional] If you want to show a custom webpage (instead of the default one) for any of your MTurk agents, you can create an ``html`` folder within your task directory, and then create the ``<mturk_agent_id>_cover_page.html`` and ``<mturk_agent_id>_index.html`` files within the ``html`` directory. In those files, you can extend from ``core.html`` and override any code blocks that you want to change. (Please look at `parlai/mturk/core/html/mturk_index.html <https://github.com/facebookresearch/ParlAI/blob/master/parlai/mturk/core/html/mturk_index.html>`__ as an example.) These agent-specific templates will automatically be shown to the Turkers in the next run.
-
+4. [Optional] If you want to show a custom webpage (instead of the default one) for any of your MTurk agents, you can create an ``html`` folder within your task directory, and then create the ``<mturk_agent_id>_cover_page.html`` and ``<mturk_agent_id>_index.html`` files within the ``html`` directory. In those files, you can extend from ``core.html`` and override any code blocks that you want to change. (Please look at `parlai/mturk/core/html/mturk_index.html <https://github.com/facebookresearch/ParlAI/blob/master/parlai/mturk/core/server/html/mturk_index.html>`__ as an example.) These agent-specific templates will automatically be shown to the Turkers in the next run.
 
 Running a Task
 --------------
@@ -129,6 +136,8 @@ Please make sure to test your task in MTurk sandbox mode first (``--sandbox``) b
 Additional flags can be used for more specific purposes.
 
 - ``--unique`` ensures that an Turker is only able to complete one assignment, thus ensuring each assignment is completed by a unique person.
+
+- ``--unique-qual-name <name>`` lets you use the above functionality across more than one task. Workers will only be able to complete a task launched with this flag for a given `<name>` once.
 
 - ``--allowed-conversations <num>`` prevents a Turker from entering more than <num> conversations at once (by using multiple windows/tabs). This defaults to 0, which is unlimited.
 
