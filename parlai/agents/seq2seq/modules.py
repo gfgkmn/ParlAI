@@ -53,14 +53,29 @@ class Seq2seq(nn.Module):
             self.ranker = Ranker(self.decoder, padding_idx=self.NULL_IDX,
                                  attn_type=opt['attention'])
 
-    def forward(self, xs, ys=None, cands=None, valid_cands=None):
+    def forward(self, xs, ys=None, cands=None, valid_cands=None, prev_enc=None):
+        """Get output predictions from the model.
+
+        Arguments:
+        xs -- input to the encoder
+        ys -- expected output from the decoder
+        cands -- set of candidates to rank, if applicable
+        valid_cands -- indices to match candidates with their appropriate xs
+        prev_enc -- if you know you'll pass in the same xs multiple times and
+            the model is in eval mode, you can pass in the encoder output from
+            the last forward pass to skip recalcuating the same encoder output
+        """
         bsz = len(xs)
         if ys is not None:
             # keep track of longest label we've ever seen
             # we'll never produce longer ones than that during prediction
             self.longest_label = max(self.longest_label, ys.size(1))
 
-        enc_out, hidden = self.encoder(xs)
+        if prev_enc is not None:
+            enc_out, hidden = prev_enc
+        else:
+            enc_out, hidden = self.encoder(xs)
+        encoder_states = (enc_out, hidden)
         attn_mask = xs.ne(0).float() if self.attn_type != 'none' else None
         start = Variable(self.START, requires_grad=False)
         starts = start.expand(bsz, 1)
@@ -68,11 +83,15 @@ class Seq2seq(nn.Module):
         predictions = []
         scores = []
         text_cand_inds = None
+        if self.rank and cands is not None:
+            text_cand_inds = self.ranker.forward(cands, valid_cands, start,
+                                                 hidden, enc_out, attn_mask)
+
         if ys is not None:
             y_in = ys.narrow(1, 0, ys.size(1) - 1)
             xs = torch.cat([starts, y_in], 1)
             if self.attn_type == 'none':
-                preds, score, _h = self.decoder(xs, hidden, enc_out, attn_mask)
+                preds, score, hidden = self.decoder(xs, hidden, enc_out, attn_mask)
                 predictions.append(preds)
                 scores.append(score)
             else:
@@ -105,15 +124,12 @@ class Seq2seq(nn.Module):
                 if total_done == bsz:
                     # no need to generate any more
                     break
-            if self.rank and cands is not None:
-                text_cand_inds = self.ranker(cands, valid_cands, start,
-                                             hidden, enc_out, attn_mask)
 
         if predictions:
             predictions = torch.cat(predictions, 1)
         if scores:
             scores = torch.cat(scores, 1)
-        return predictions, scores, text_cand_inds
+        return predictions, scores, text_cand_inds, encoder_states
 
 
 class Encoder(nn.Module):
@@ -159,8 +175,13 @@ class Encoder(nn.Module):
 
         # embed input tokens
         xes = F.dropout(self.lt(xs), p=self.dropout, training=self.training)
-        x_lens = [x for x in torch.sum((xs > 0).int(), dim=1).data]
-        xes_packed = pack_padded_sequence(xes, x_lens, batch_first=True)
+        try:
+            x_lens = [x for x in torch.sum((xs > 0).int(), dim=1).data]
+            xes = pack_padded_sequence(xes, x_lens, batch_first=True)
+            packed = True
+        except ValueError:
+            # packing failed, don't pack then
+            pass
 
         zeros = self.zeros(xs)
         if zeros.size(1) != bsz:
@@ -168,19 +189,20 @@ class Encoder(nn.Module):
         h0 = Variable(zeros, requires_grad=False)
 
         if type(self.rnn) == nn.LSTM:
-            encoder_output_packed, hidden = self.rnn(xes_packed, (h0, h0))
+            encoder_output, hidden = self.rnn(xes, (h0, h0))
             if self.dirs > 1:
                 # take elementwise max between forward and backward hidden states
                 hidden = (hidden[0].view(-1, self.dirs, bsz, self.hsz).max(1)[0],
                           hidden[1].view(-1, self.dirs, bsz, self.hsz).max(1)[0])
         else:
-            encoder_output_packed, hidden = self.rnn(xes_packed, h0)
+            encoder_output, hidden = self.rnn(xes, h0)
 
             if self.dirs > 1:
                 # take elementwise max between forward and backward hidden states
                 hidden = hidden.view(-1, self.dirs, bsz, self.hsz).max(1)[0]
-        encoder_output, _ = pad_packed_sequence(encoder_output_packed,
-                                                batch_first=True)
+        if packed:
+            encoder_output, _ = pad_packed_sequence(encoder_output,
+                                                    batch_first=True)
         return encoder_output, hidden
 
 
@@ -207,9 +229,9 @@ class Decoder(nn.Module):
 
         # rnn output to embedding
         if hidden_size != emb_size:
-            self.o2e = RandomProjection(hidden_size, emb_size)
+            # self.o2e = RandomProjection(hidden_size, emb_size)
             # other option here is to learn these weights
-            # self.o2e = nn.Linear(hidden_size, emb_size, bias=False)
+            self.o2e = nn.Linear(hidden_size, emb_size, bias=False)
         else:
             # no need for any transformation here
             self.o2e = lambda x: x
@@ -248,7 +270,7 @@ class Decoder(nn.Module):
         return preds, scores, new_hidden
 
 
-class Ranker(nn.Module):
+class Ranker(object):
     def __init__(self, decoder, padding_idx=0, attn_type='none'):
         super().__init__()
         self.decoder = decoder
@@ -448,8 +470,7 @@ class AttentionLayer(nn.Module):
 
         if self.attention != 'none':
             hsz = hidden_size
-            num_dirs = 2 if bidirectional else 1
-            hszXdirs = hsz * num_dirs
+            hszXdirs = hsz * (2 if bidirectional else 1)
             if attn_time == 'pre':
                 # attention happens on the input embeddings
                 input_dim = emb_size

@@ -24,7 +24,6 @@ import re
 
 class LanguageModelAgent(Agent):
     """ Agent which trains an RNN on a language modeling task.
-
     It is adapted from the language model featured in Pytorch's examples repo
     here: <https://github.com/pytorch/examples/tree/master/word_language_model>.
     """
@@ -37,7 +36,6 @@ class LanguageModelAgent(Agent):
     def add_cmdline_args(argparser):
         """Add command-line arguments specifically for this agent."""
         argparser.set_defaults(batch_sort=False)
-        LanguageModelAgent.dictionary_class().add_cmdline_args(argparser)
         agent = argparser.add_argument_group('Language Model Arguments')
         agent.add_argument('--init-model', type=str, default=None,
                            help='load dict/features/weights/opts from this file')
@@ -67,7 +65,7 @@ class LanguageModelAgent(Agent):
                            help='truncate predictions')
         agent.add_argument('-rf', '--report-freq', type=float, default=0.1,
                            help='report frequency of prediction during eval')
-        agent.add_argument('-pt', '--person-tokens', type=bool, default=True,
+        agent.add_argument('-pt', '--person-tokens', type='bool', default=True,
                            help='append person1 and person2 tokens to text')
         # learning rate parameters
         agent.add_argument('-lr', '--learningrate', type=float, default=20,
@@ -79,9 +77,11 @@ class LanguageModelAgent(Agent):
                            help='wait before decreasing learning rate')
         agent.add_argument('-lrm', '--lr-minimum', type=float, default=0.1,
                            help='minimum learning rate')
-        agent.add_argument('-sm', '--sampling-mode', type=bool, default=False,
+        agent.add_argument('-sm', '--sampling-mode', type='bool', default=False,
                            help='sample when generating tokens instead of taking \
                            the max and do not produce UNK token (when bs=1)')
+        LanguageModelAgent.dictionary_class().add_cmdline_args(argparser)
+        return agent
 
     def __init__(self, opt, shared=None):
         """Set up model if shared params not set, otherwise no work to do."""
@@ -208,7 +208,6 @@ class LanguageModelAgent(Agent):
 
     def override_opt(self, new_opt):
         """Set overridable opts from loaded opt file.
-
         Print out each added key and each overriden key.
         Only override args specific to the model.
         """
@@ -330,7 +329,7 @@ class LanguageModelAgent(Agent):
 
     def repackage_hidden(self, h):
         """Wraps hidden states in new Variables, to detach them from their history."""
-        if type(h) == Variable:
+        if isinstance(h, Variable):
             return Variable(h.data)
         else:
             return tuple(self.repackage_hidden(v) for v in h)
@@ -391,6 +390,12 @@ class LanguageModelAgent(Agent):
             else:
                 if self.sampling_mode:
                     unk_idx = self.dict[self.dict.unk_token]
+                    # make word_weights have smaller norm so that calculated
+                    # norm does not blow up
+                    word_weights = word_weights.div(1e10)
+                    # make word_weights have L2 norm 1
+                    ww_norm = torch.norm(word_weights, p=2)
+                    word_weights = word_weights.div(ww_norm)
                     # square distribution
                     word_weights = torch.mul(word_weights, word_weights)
                     # sample distribution
@@ -435,9 +440,10 @@ class LanguageModelAgent(Agent):
             bsz = data.size(0)
             if bsz != self.batchsize:
                 self.hidden = self.model.init_hidden(bsz)
-            loss = self.get_target_loss(data, self.hidden, targets)
-            self.metrics['loss'] += loss
-            self.metrics['num_tokens'] += sum(y_lens)
+            if targets is not None:
+                loss = self.get_target_loss(data, self.hidden, targets)
+                self.metrics['loss'] += loss
+                self.metrics['num_tokens'] += sum(y_lens)
 
         return output, hidden, predictions
 
@@ -569,7 +575,5 @@ class LanguageModelAgent(Agent):
 
     def load(self, path):
         """Return opt and model states."""
-        with open(path, 'rb') as read:
-            states = torch.load(read)
-
+        states = torch.load(path, map_location=lambda cpu, _: cpu)
         return states['opt'], states
