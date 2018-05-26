@@ -330,6 +330,8 @@ class KvmemnnAgent(Agent):
             vec = vec.data
         if type(vec) == torch.LongTensor and vec.dim() == 2:
             vec = vec.squeeze(0)
+        if type(vec) == torch.Tensor and vec.dim() == 2:
+            vec = vec.squeeze(0)
         new_vec = []
         for i in vec:
             new_vec.append(i)
@@ -347,12 +349,13 @@ class KvmemnnAgent(Agent):
         """Reset observation and episode_done."""
         self.observation = None
         self.episode_done = True
+        self.cands_done = []
+        self.history = {}
         # set up optimizer
         lr = self.opt['learningrate']
         optim_class = KvmemnnAgent.OPTIM_OPTS[self.opt['optimizer']]
         kwargs = {'lr': lr}
         self.optimizer = optim_class(self.model.parameters(), **kwargs)
-
 
     def share(self):
         """Share internal states between parent and child instances."""
@@ -445,7 +448,7 @@ class KvmemnnAgent(Agent):
         for i in range(1, k * 3):
             index =  random.randint(0, cache_sz)
             neg = self.ys_cache[index]
-            if not self.same(ys.squeeze(), neg.squeeze()):
+            if not self.same(ys.squeeze(0), neg.squeeze(0)):
                 negs.append(neg)
                 if len(negs) >= k:
                     break
@@ -503,8 +506,8 @@ class KvmemnnAgent(Agent):
                     pred = nn.CosineSimilarity().forward(xe,ye)
                 else:
                     pred = x
-                metrics = self.compute_metrics(loss.data[0],
-                pred.data.squeeze(), self.start2-self.start, rest)
+                metrics = self.compute_metrics(loss.item(),
+                pred.data.squeeze(0), self.start2-self.start, rest)
                 return [{'metrics':metrics}]
         else:
             fixed = False
