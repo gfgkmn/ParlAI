@@ -157,7 +157,7 @@ class DocReaderModel(object):
             scores.triu_().tril_(max_len - 1)
             scores = scores.numpy()
             s_idx, e_idx = np.unravel_index(np.argmax(scores), scores.shape)
-            s_offset, e_offset = spans[i][s_idx][0], spans[i][e_idx][1]
+            s_offset, e_offset = spans[i][1][s_idx][0], spans[i][1][e_idx][1]
             predictions.append(text[i][s_offset:e_offset])
 
             if self.opt['visualize_attention']:

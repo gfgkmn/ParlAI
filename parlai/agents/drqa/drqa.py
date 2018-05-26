@@ -34,12 +34,13 @@ from parlai.core.dict import DictionaryAgent
 from . import config
 from .utils import build_feature_dict, vectorize, batchify, normalize_text
 from .model import DocReaderModel
+import en_core_web_lg
 
 # ------------------------------------------------------------------------------
 # Dictionary.
 # ------------------------------------------------------------------------------
 
-NLP = spacy.load('en_core_web_sm')
+NLP = en_core_web_lg.load()
 
 
 class SimpleDictionaryAgent(DictionaryAgent):

@@ -30,10 +30,10 @@ def select():
 
 @app.route('/submit')
 def submit():
-    # a = request.args.get('paragraph')
+    a = request.args.get('paragraph')
     b = request.args.get('question')
-    # finaltext = a + '\n' + b
-    finaltext = b
+    finaltext = a + '\n' + b
+    # finaltext = b
     response = reply(wrap_input(finaltext), socket)
     return jsonify(result=response['text'])
 

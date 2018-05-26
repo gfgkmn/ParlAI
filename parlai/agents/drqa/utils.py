@@ -8,8 +8,9 @@ import torch
 import unicodedata
 from collections import Counter
 import spacy
+import en_core_web_lg
 
-NLP = spacy.load('en_core_web_sm')
+NLP = en_core_web_lg.load()
 
 pos_list = [
     'DET', 'ADP', 'PART', 'ADJ', 'PUNCT', 'INTJ', 'NOUN', 'ADV', 'X', 'PRON',

@@ -201,14 +201,14 @@ class DictionaryAgent(Agent):
             self.word_tok = nltk.tokenize.treebank.TreebankWordTokenizer()
         elif self.tokenizer == 'spacy':
             try:
-                import spacy
+                import en_core_web_lg
             except ImportError:
                 raise ImportError('Please install spacy and spacy "en" model: '
                                   '`pip install -U spacy && '
                                   'python -m spacy download en` '
                                   'or find alternative installation options '
                                   'at spacy.io')
-            self.NLP = spacy.load('en')
+            self.NLP = en_core_web_lg.load()
 
         if not shared:
 
