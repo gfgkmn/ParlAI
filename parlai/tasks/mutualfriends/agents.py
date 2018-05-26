@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree. An additional grant
 # of patent rights can be found in the PATENTS file in the same directory.
 
-from parlai.core.dialog_teacher import DialogTeacher
+from parlai.core.teachers import DialogTeacher
 from .build import build
 
 import json
@@ -36,8 +36,8 @@ class DefaultTeacher(DialogTeacher):
         """Load json data of conversations."""
         print('loading: ' + path)
         with open(path) as data_file:
-            self.data = json.load(data_file)
-        for ex in self.data:
+            self.loaded_data = json.load(data_file)
+        for ex in self.loaded_data:
             if len(ex['events']) > 0:
                 # TODO: add reverse conversation as well
                 curr_agent = ex['events'][0]['agent']

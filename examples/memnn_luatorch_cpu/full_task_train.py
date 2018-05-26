@@ -17,10 +17,8 @@ from parlai.agents.remote_agent.remote_agent import ParsedRemoteAgent
 from parlai.core.worlds import create_task
 from parlai.core.dict import DictionaryAgent
 from parlai.core.params import ParlaiParser
-from parlai.core.worlds import DialogPartnerWorld, HogwildWorld
 
 import copy
-import math
 import os
 import sys
 import time
@@ -63,7 +61,7 @@ def main():
         print('Dictionary building on training data.')
         cnt = 0
         # pass examples to dictionary
-        for _ in world_dict:
+        while not world_dict.epoch_done():
             cnt += 1
             if cnt > opt['dict_max_exs'] and opt['dict_max_exs'] > 0:
                 print('Processed {} exs, moving on.'.format(
@@ -82,8 +80,11 @@ def main():
     opt['datatype'] = 'train'
     agent = ParsedRemoteAgent(opt, {'dictionary_shared': dictionary.share()})
     world_train = create_task(opt, agent)
-    opt['datatype'] = 'valid'
-    world_valid = create_task(opt, agent)
+
+    valid_opt = copy.deepcopy(opt)
+    valid_opt['datatype'] = 'valid'
+    valid_opt['numthreads'] = 1  # switch to 1 thread, the memnn code will handle it better
+    world_valid = create_task(valid_opt, agent)
 
     start = time.time()
     with world_train:
@@ -91,11 +92,10 @@ def main():
             print('[ training ]')
             for _ in range(opt['num_examples'] * opt.get('numthreads', 1)):
                 world_train.parley()
-            world_train.synchronize()
 
             print('[ validating ]')
             world_valid.reset()
-            for _ in world_valid:  # check valid accuracy
+            while not world_valid.epoch_done():  # check valid accuracy
                 world_valid.parley()
 
             print('[ validation summary. ]')
@@ -104,8 +104,8 @@ def main():
             if report_valid['accuracy'] > 0.95:
                 break
 
-        # show some example dialogs after training:
-        world_valid = create_task(opt, agent)
+        #show some example dialogs after training:
+        world_valid = create_task(valid_opt, agent)
         for _k in range(3):
             world_valid.parley()
             print(world_valid.display())

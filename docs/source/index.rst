@@ -25,6 +25,7 @@ ParlAI is a one-stop-shop for dialog research.
    task_tutorial
    seq2seq_tutorial
    mturk
+   messenger
 
 .. toctree::
    :maxdepth: 1
@@ -32,11 +33,10 @@ ParlAI is a one-stop-shop for dialog research.
 
    agents
    build_data
-   dialog
    dict
-   fbdialog
    metrics
    params
+   teachers
    thread_utils
    worlds
 
@@ -52,6 +52,7 @@ ParlAI is a one-stop-shop for dialog research.
 
   remote_agent
   repeat_label
+  coopgame_agent
 
 
 Indices and tables

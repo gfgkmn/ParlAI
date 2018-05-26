@@ -9,7 +9,6 @@ from .agents import Agent
 from collections import defaultdict
 import copy
 import numpy as np
-import nltk
 import os
 
 
@@ -69,10 +68,13 @@ class DictionaryAgent(Agent):
     default_lang = 'english'
     default_maxngram = -1
     default_minfreq = 0
+    default_maxtokens = -1
     default_null = '__NULL__'
     default_start = '__START__'
     default_end = '__END__'
     default_unk = '__UNK__'
+    default_tok = 'split'
+    default_lower = False
 
     @staticmethod
     def add_cmdline_args(argparser):
@@ -99,6 +101,10 @@ class DictionaryAgent(Agent):
             type=int,
             help='minimum frequency of words to include them in sorted dict')
         dictionary.add_argument(
+            '--dict-maxtokens', default=DictionaryAgent.default_maxtokens,
+            type=int,
+            help='max number of tokens to include in sorted dict')
+        dictionary.add_argument(
            '--dict-nulltoken', default=DictionaryAgent.default_null,
            help='empty token, can be used for padding or just empty values')
         dictionary.add_argument(
@@ -111,8 +117,16 @@ class DictionaryAgent(Agent):
             '--dict-unktoken', default=DictionaryAgent.default_unk,
             help='token to return for unavailable words')
         dictionary.add_argument(
-            '--dict-maxexs', default=100000, type=int,
+            '--dict-maxexs', default=-1, type=int,
             help='max number of examples to build dict on')
+        dictionary.add_argument(
+            '-tok', '--dict-tokenizer', default=DictionaryAgent.default_tok,
+            help='Which tokenizer to use. Defaults to "split", which splits '
+                 'on whitespace as well as recognizing basic punctuation. '
+                 'Other options include nltk and spacy.')
+        dictionary.add_argument(
+            '--dict-lower', default=DictionaryAgent.default_lower, type='bool',
+            help='Whether or not to lowercase all text seen.')
         return dictionary
 
     def __init__(self, opt, shared=None):
@@ -126,6 +140,9 @@ class DictionaryAgent(Agent):
         self.unk_token = opt['dict_unktoken']
         self.start_token = opt['dict_starttoken']
         self.max_ngram_size = opt['dict_max_ngram_size']
+        self.tokenizer = opt.get('dict_tokenizer', DictionaryAgent.default_tok)
+        self.lower = opt.get('dict_lower', DictionaryAgent.default_lower)
+        self.maxtokens = opt.get('dict_maxtokens', DictionaryAgent.default_maxtokens)
 
         if shared:
             self.freq = shared.get('freq', {})
@@ -166,14 +183,29 @@ class DictionaryAgent(Agent):
                 self.load(opt['dict_initpath'])
 
         # initialize tokenizers
-        st_path = 'tokenizers/punkt/{0}.pickle'.format(opt['dict_language'])
-        try:
-            self.sent_tok = nltk.data.load(st_path)
-        except LookupError:
-            nltk.download('punkt')
-            self.sent_tok = nltk.data.load(st_path)
-
-        self.word_tok = nltk.tokenize.treebank.TreebankWordTokenizer()
+        if self.tokenizer == 'nltk':
+            try:
+                import nltk
+            except ImportError:
+                raise ImportError('Please install nltk (e.g. pip install nltk).')
+            # nltk-specific setup
+            st_path = 'tokenizers/punkt/{0}.pickle'.format(opt['dict_language'])
+            try:
+                self.sent_tok = nltk.data.load(st_path)
+            except LookupError:
+                nltk.download('punkt')
+                self.sent_tok = nltk.data.load(st_path)
+            self.word_tok = nltk.tokenize.treebank.TreebankWordTokenizer()
+        elif self.tokenizer == 'spacy':
+            try:
+                import spacy
+            except ImportError:
+                raise ImportError('Please install spacy and spacy "en" model: '
+                                  '`pip install -U spacy && '
+                                  'python -m spacy download en` '
+                                  'or find alternative installation options '
+                                  'at spacy.io')
+            self.NLP = spacy.load('en')
 
         if not shared:
 
@@ -227,24 +259,89 @@ class DictionaryAgent(Agent):
         its frequency to value.
         """
         key = str(key)
+        if self.lower:
+            key = key.lower()
         self.freq[key] = int(value)
         if key not in self.tok2ind:
             index = len(self.tok2ind)
             self.tok2ind[key] = index
             self.ind2tok[index] = key
 
+    def copy_dict(self, dictionary):
+        """Overwrite own state with any state in the other dictionary.
+        This allows loading of the contents of another dictionary while keeping
+        the current dictionary version.
+        """
+        for k, v in vars(dictionary).items():
+            setattr(self, k, v)
+
     def freqs(self):
         return self.freq
 
-    def _sent_tokenize(self, text, building=False):
-        """Uses nltk-trained PunktTokenizer for sentence tokenization"""
-        return self.sent_tok.tokenize(text)
+    def spacy_tokenize(self, text, **kwargs):
+        tokens = self.NLP.tokenizer(text)
+        return [t.text for t in tokens]
 
-    def _word_tokenize(self, text, building=False):
-        """Uses nltk Treebank Word Tokenizer for tokenizing words within
-        sentences.
+    def spacy_span_tokenize(self, text):
+        """Returns tuple of tokens, spans."""
+        tokens = self.NLP.tokenizer(text)
+        return ([t.text for t in tokens],
+                [(t.idx, t.idx + len(t.text)) for t in tokens])
+
+    def nltk_tokenize(self, text, building=False):
+        """Uses nltk-trained PunktTokenizer for sentence tokenization and
+        Treebank Word Tokenizer for tokenizing words within sentences.
         """
-        word_tokens = self.word_tok.tokenize(text)
+
+        return (token for sent in self.sent_tok.tokenize(text)
+                for token in self.word_tok.tokenize(sent))
+
+    @staticmethod
+    def split_tokenize(text):
+        """Splits tokens based on whitespace after adding whitespace around
+        punctuation.
+        """
+        return (text.replace('.', ' . ').replace('. . .', '...')
+                .replace(',', ' , ').replace(';', ' ; ').replace(':', ' : ')
+                .replace('!', ' ! ').replace('?', ' ? ')
+                .split())
+
+    def span_tokenize(self, text):
+        """Tokenizes, and then calculates the starting index of each token in
+        the original string.
+        """
+        if self.tokenizer == 'spacy':
+            # spacy has own
+            return self.spacy_span_tokenize(text)
+        tokens = self.tokenize(text)
+        curr_idx = 0
+        indices = []
+        for t in tokens:
+            while text[curr_idx] != t[0]:
+                curr_idx += 1
+            indices.append((curr_idx, curr_idx + len(t)))
+            curr_idx += len(t)
+        return tokens, indices
+
+    def tokenize(self, text, building=False):
+        """Returns a sequence of tokens from the iterable."""
+        if self.lower:
+            text = text.lower()
+        tokenizer = self.tokenizer
+        if tokenizer == 'split':
+            word_tokens = self.split_tokenize(text)
+        elif tokenizer == 'nltk':
+            word_tokens = self.nltk_tokenize(text)
+        elif tokenizer == 'spacy':
+            word_tokens = self.spacy_tokenize(text)
+        else:
+            method_name = str(tokenizer) + '_tokenize'
+            if hasattr(self, method_name):
+                fun = getattr(self, method_name)
+                word_tokens = fun(text)
+            else:
+                raise RuntimeError(
+                    'tokenizer type {} not yet supported'.format(tokenizer))
 
         if not building and self.max_ngram_size > 1:
             # search for ngrams during parse-time
@@ -252,11 +349,6 @@ class DictionaryAgent(Agent):
             word_tokens = find_ngrams(self.tok2ind, word_tokens,
                                       self.max_ngram_size)
         return word_tokens
-
-    def tokenize(self, text, building=False):
-        """Returns a sequence of tokens from the iterable."""
-        return (token for sent in self._sent_tokenize(text, building)
-                for token in self._word_tokenize(sent, building))
 
     def add_to_dict(self, tokens):
         """ Builds dictionary from the list of provided tokens."""
@@ -278,6 +370,15 @@ class DictionaryAgent(Agent):
                 del self.ind2tok[idx]
         for token in to_remove:
             del self.freq[token]
+
+    def resize_to_max(self, maxtokens):
+        # defaults to -1, only trim dict if >= 0
+        if maxtokens >= 0 and len(self.tok2ind) > maxtokens:
+            for k in range(maxtokens, len(self.ind2tok)):
+                v = self.ind2tok[k]
+                del self.ind2tok[k]
+                del self.tok2ind[v]
+                del self.freq[v]
 
     def load(self, filename):
         """Load pre-existing dictionary in 'token[<TAB>count]' format.
@@ -333,6 +434,7 @@ class DictionaryAgent(Agent):
             new_ind2tok[i] = tok
         self.tok2ind = new_tok2ind
         self.ind2tok = new_ind2tok
+        self.resize_to_max(self.maxtokens)
         return sorted_pairs
 
     def parse(self, txt_or_vec, vec_type=list):

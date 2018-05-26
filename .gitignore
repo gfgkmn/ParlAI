@@ -28,6 +28,7 @@ parts/
 sdist/
 var/
 parlai_internal/
+parlai_external/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -115,3 +116,7 @@ heroku-cli-*
 .idea
 *.iml
 frontend_demo/attention_vis/
+
+# VSCode
+
+*.vscode

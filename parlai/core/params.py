@@ -15,6 +15,7 @@ from parlai.core.agents import get_agent_module, get_task_module
 from parlai.tasks.tasks import ids_to_tasks
 import torch
 
+
 def str2bool(value):
     v = value.lower()
     if v in ('yes', 'true', 't', '1', 'y'):
@@ -23,6 +24,7 @@ def str2bool(value):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
 
 def str2class(value):
     """From import path string, returns the class specified. For example, the
@@ -35,11 +37,12 @@ def str2class(value):
     module = importlib.import_module(name[0])
     return getattr(module, name[1])
 
+
 def class2str(value):
     """Inverse of params.str2class()."""
     s = str(value)
-    s = s[s.find('\'') + 1 : s.rfind('\'')] # pull out import path
-    s = ':'.join(s.rsplit('.', 1)) # replace last period with ':'
+    s = s[s.find('\'') + 1:s.rfind('\'')]  # pull out import path
+    s = ':'.join(s.rsplit('.', 1))  # replace last period with ':'
     return s
 
 
@@ -73,6 +76,9 @@ class ParlaiParser(argparse.ArgumentParser):
         self.add_arg = self.add_argument
         # function reassignment
 
+        # remember which args were specified on the command line
+        self.cli_args = sys.argv
+
         if add_parlai_args:
             self.add_parlai_args(model_argv)
             self.add_image_args()
@@ -104,6 +110,10 @@ class ParlaiParser(argparse.ArgumentParser):
             '--unique', dest='unique_worker', default=False,
             action='store_true',
             help='enforce that no worker can work on your task twice')
+        mturk.add_argument(
+            '--unique-qual-name', dest='unique_qual_name',
+            default=None, type=str,
+            help='qualification name to use for uniqueness between HITs')
         mturk.add_argument(
             '-r', '--reward', default=0.05, type=float,
             help='reward for each worker for finishing the conversation, '
@@ -144,10 +154,46 @@ class ParlaiParser(argparse.ArgumentParser):
             default=0, type=int,
             help='number of concurrent conversations that one mturk worker '
                  'is able to be involved in, 0 is unlimited')
+        mturk.add_argument(
+            '--max-connections', dest='max_connections',
+            default=30, type=int,
+            help='number of HITs that can be launched at the same time, 0 is '
+                 'unlimited.'
+        )
+        mturk.add_argument(
+            '--min-messages', dest='min_messages',
+            default=0, type=int,
+            help='number of messages required to be sent by MTurk agent when '
+                 'considering whether to approve a HIT in the event of a '
+                 'partner disconnect. I.e. if the number of messages '
+                 'exceeds this number, the turker can submit the HIT.'
+        )
 
         mturk.set_defaults(is_sandbox=True)
         mturk.set_defaults(is_debug=False)
         mturk.set_defaults(verbose=False)
+
+    def add_messenger_args(self):
+        messenger = self.add_argument_group('Facebook Messenger')
+        messenger.add_argument(
+            '--debug', dest='is_debug', action='store_true',
+            help='print and log all server interactions and messages')
+        messenger.add_argument(
+            '--verbose', dest='verbose', action='store_true',
+            help='print all messages sent to and from Turkers')
+        messenger.add_argument(
+            '--log-level', dest='log_level', type=int, default=20,
+            help='importance level for what to put into the logs. the lower '
+                 'the level the more that gets logged. values are 0-50')
+        messenger.add_argument(
+            '--force-page-token', dest='force_page_token', action='store_true',
+            help='override the page token stored in the cache for a new one')
+        messenger.add_argument(
+            '--password', dest='password', type=str, default=None,
+            help='Require a password for entry to the bot')
+
+        messenger.set_defaults(is_debug=False)
+        messenger.set_defaults(verbose=False)
 
     def add_parlai_args(self, args=None):
         default_downloads_path = os.path.join(self.parlai_home, 'downloads')
@@ -165,8 +211,8 @@ class ParlaiParser(argparse.ArgumentParser):
         parlai.add_argument(
             '-dt', '--datatype', default='train',
             choices=['train', 'train:stream', 'train:ordered',
-                'train:ordered:stream', 'train:stream:ordered',
-                'valid', 'valid:stream', 'test', 'test:stream'],
+                     'train:ordered:stream', 'train:stream:ordered',
+                     'valid', 'valid:stream', 'test', 'test:stream'],
             help='choose from: train, train:ordered, valid, test. to stream '
                  'data add ":stream" to any option (e.g., train:stream). '
                  'by default: train is random with replacement, '
@@ -178,11 +224,29 @@ class ParlaiParser(argparse.ArgumentParser):
         parlai.add_argument(
             '-nt', '--numthreads', default=1, type=int,
             help='number of threads. If batchsize set to 1, used for hogwild; '
-                 'otherwise, used for number of threads in threadpool loading, '
-                 'e.g. in vqa')
-        parlai.add_argument(
+                 'otherwise, used for number of threads in threadpool loading,'
+                 ' e.g. in vqa')
+        batch = self.add_argument_group('Batching Arguments')
+        batch.add_argument(
             '-bs', '--batchsize', default=1, type=int,
             help='batch size for minibatch training schemes')
+        batch.add_argument('-bsrt', '--batch-sort', default=True, type='bool',
+                           help='If enabled (default True), create batches by '
+                                'flattening all episodes to have exactly one '
+                                'utterance exchange and then sorting all the '
+                                'examples according to their length. This '
+                                'dramatically reduces the amount of padding '
+                                'present after examples have been parsed, '
+                                'speeding up training.')
+        batch.add_argument('-clen', '--context-length', default=-1, type=int,
+                           help='Number of past utterances to remember when '
+                                'building flattened batches of data in multi-'
+                                'example episodes.')
+        batch.add_argument('-incl', '--include-labels',
+                           default=True, type='bool',
+                           help='Specifies whether or not to include labels '
+                                'as past utterances when building flattened '
+                                'batches of data in multi-example episodes.')
         self.add_parlai_data_path(parlai)
         self.add_task_args(args)
 
@@ -243,9 +307,9 @@ class ParlaiParser(argparse.ArgumentParser):
             parlai = \
                 self.add_argument_group('ParlAI Image Preprocessing Arguments')
             parlai.add_argument('--image-size', type=int, default=256,
-                help='')
+                                help='resizing dimension for images')
             parlai.add_argument('--image-cropsize', type=int, default=224,
-                help='')
+                                help='crop dimension for images')
 
     def parse_args(self, args=None, namespace=None, print_args=True):
         """Parses the provided arguments and returns a dictionary of the
@@ -258,12 +322,23 @@ class ParlaiParser(argparse.ArgumentParser):
 
         # custom post-parsing
         self.opt['parlai_home'] = self.parlai_home
+        if 'batchsize' in self.opt and self.opt['batchsize'] <= 1:
+            # hide batch options
+            self.opt.pop('batch_sort', None)
+            self.opt.pop('context_length', None)
 
         # set environment variables
         if self.opt.get('download_path'):
             os.environ['PARLAI_DOWNPATH'] = self.opt['download_path']
         if self.opt.get('datapath'):
             os.environ['PARLAI_DATAPATH'] = self.opt['datapath']
+
+        # set all arguments specified in commandline as overridable
+        override = {}
+        for k, v in self.opt.items():
+            if v in self.cli_args:
+                override[k] = v
+        self.opt['override'] = override
 
         if print_args:
             self.print_args()
@@ -279,7 +354,7 @@ class ParlaiParser(argparse.ArgumentParser):
             values[str(key)] = str(value)
         for group in self._action_groups:
             group_dict = {
-                a.dest:getattr(self.args,a.dest,None)
+                a.dest: getattr(self.args, a.dest, None)
                 for a in group._group_actions
             }
             namespace = argparse.Namespace(**group_dict)
