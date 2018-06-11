@@ -313,14 +313,5 @@ class DrqaAgent(Agent):
         if len(targets) == 0:
             return
         return targets[np.random.choice(len(targets))]
-<<<<<<< HEAD
         # so we could know drqa's hypothesis is still squad-like dataset.
         # answer should be sub-string in document.
-
-    def report(self):
-        return (
-            '[train] updates = %d | train loss = %.2f | exs = %d' %
-            (self.model.updates, self.model.train_loss.avg, self.n_examples)
-            )
-=======
->>>>>>> f5a046bb6f14db204f9ea5e0e8a30abb9ee9134e
