@@ -222,6 +222,13 @@ task_list = [
         "description": "Open-domain QA dataset answerable from a given paragraph from Wikipedia, from Rajpurkar et al. '16. Link: https://arxiv.org/abs/1606.05250"
     },
     {
+        "id": "Cips",
+        "display_name": "Cips",
+        "task": "cips",
+        "tags": [ "All",  "QA" ],
+        "description": "Open-domain QA dataset answerable from a given paragraph from Sogou search, from Sogou lizhi group et al."
+    },
+    {
         "id": "TriviaQA",
         "display_name": "TriviaQA",
         "task": "triviaqa",

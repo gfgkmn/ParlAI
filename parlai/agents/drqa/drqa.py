@@ -276,6 +276,7 @@ class DrqaAgent(Agent):
 
         batchsize = len(observations)
         batch_reply = [{'id': self.getID()} for _ in range(batchsize)]
+        # __import__('ipdb').set_trace()
 
         # Some examples will be None (no answer found). Filter them.
         examples = [self._build_ex(obs) for obs in observations]
@@ -388,9 +389,3 @@ class DrqaAgent(Agent):
         return targets[np.random.choice(len(targets))]
         # so we could know drqa's hypothesis is still squad-like dataset.
         # answer should be sub-string in document.
-
-    def report(self):
-        return (
-            '[train] updates = %d | train loss = %.2f | exs = %d' %
-            (self.model.updates, self.model.train_loss.avg, self.n_examples)
-            )
