@@ -1,9 +1,9 @@
+#!/usr/bin/env python3
+
 ##
-## Copyright (c) 2017-present, Facebook, Inc.
-## All rights reserved.
-## This source code is licensed under the BSD-style license found in the
-## LICENSE file in the root directory of this source tree. An additional grant
-## of patent rights can be found in the PATENTS file in the same directory.
+## Copyright (c) Facebook, Inc. and its affiliates.
+## This source code is licensed under the MIT license found in the
+## LICENSE file in the root directory of this source tree.
 ##
 import random
 from parlai.core.agents import Teacher
@@ -13,22 +13,34 @@ from copy import deepcopy
 import os
 import pickle
 
-class DefaultTeacher(Teacher):
 
+class DefaultTeacher(Teacher):
     def __init__(self, opt, shared=None):
         self.datatype = opt['datatype']
         self.terminate = opt['terminate']
         self.random = not self.terminate
         self.step_size = opt.get('batchsize', 1)
-        self.episode_index = opt.get('batchindex', 0)
+        self.episode_index = shared and shared.get('batchindex') or 0
         self.opt = deepcopy(opt)
 
         if not shared:
             datapath = join(opt['datapath'], 'graph_world2', opt['datatype'])
             self.data = self._setup_data(datapath)
             if hasattr(self, 'valid_weights'):
-                assert len(self.valid_weights) == len(self.data), (len(self.valid_weights), len(self.data))
-            self.stats = {'loss': 0, 'cnt': 0, 'acc': 0, 'f1': 0, 'acc_len': dd(float), 'cnt_len': dd(float), 'correct_data': [], 'wrong_data': []}
+                assert len(self.valid_weights) == len(self.data), (
+                    len(self.valid_weights),
+                    len(self.data),
+                )
+            self.stats = {
+                'loss': 0,
+                'cnt': 0,
+                'acc': 0,
+                'f1': 0,
+                'acc_len': dd(float),
+                'cnt_len': dd(float),
+                'correct_data': [],
+                'wrong_data': [],
+            }
         else:
             self.data = shared['data']
             self.stats = shared['stats']
@@ -37,7 +49,7 @@ class DefaultTeacher(Teacher):
         self.len = len(self.data)
         super().__init__(opt, shared)
 
-        self.iter = opt.get('batchindex', 0)
+        self.iter = shared and shared.get('batchindex') or 0
 
     def __len__(self):
         return self.len
@@ -69,7 +81,13 @@ class DefaultTeacher(Teacher):
             self.episode_index %= self.len
             if self.random and self.episode_index == opt['batchsize'] - 1:
                 random.shuffle(self.data)
-        return {'text': return_example[2], 'actions': return_example[3], 'graph': return_example[1], 'episode_done': True, 'weight': return_weight}
+        return {
+            'text': return_example[2],
+            'actions': return_example[3],
+            'graph': return_example[1],
+            'episode_done': True,
+            'weight': return_weight,
+        }
 
     def observe(self, observation):
         self.observation = observation

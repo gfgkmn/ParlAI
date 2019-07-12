@@ -1,13 +1,14 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 from parlai.core.worlds import validate
 from parlai.mturk.core.worlds import MTurkOnboardWorld, MTurkTaskWorld
 import parlai.mturk.core.mturk_utils as mturk_utils
 
 import random
+
 
 class QualificationFlowOnboardWorld(MTurkOnboardWorld):
     def parley(self):
@@ -42,6 +43,7 @@ class QualificationFlowSoloWorld(MTurkTaskWorld):
     second would require the passing qualification. The first world could then
     be runnable using the --unique flag.
     """
+
     test_set = [
         ['What is 1+1?', '2'],
         ['What is 3+2?', '5'],
@@ -70,10 +72,9 @@ class QualificationFlowSoloWorld(MTurkTaskWorld):
         for _ in range(num):
             num1 = random.randint(1, 20)
             num2 = random.randint(3, 16)
-            questions.append([
-                'What is {} + {}?'.format(num1, num2),
-                '{}'.format(num1 + num2)
-            ])
+            questions.append(
+                ['What is {} + {}?'.format(num1, num2), '{}'.format(num1 + num2)]
+            )
         return questions
 
     def parley(self):
@@ -93,7 +94,7 @@ class QualificationFlowSoloWorld(MTurkTaskWorld):
             }
             self.mturk_agent.observe(validate(ad))
             answer = self.mturk_agent.act()
-            if answer == self.questions[self.curr_question][1]:
+            if answer['text'] == self.questions[self.curr_question][1]:
                 self.correct += 1
             self.curr_question += 1
 
@@ -110,11 +111,11 @@ class QualificationFlowSoloWorld(MTurkTaskWorld):
         that marks that they should be blocked from this task.
         """
         if self.firstTime and self.correct != len(self.questions):
-                mturk_utils.give_worker_qualification(
-                    self.mturk_agent.worker_id,
-                    self.qualification_id,
-                    is_sandbox=self.opt['is_sandbox'],
-                )
+            mturk_utils.give_worker_qualification(
+                self.mturk_agent.worker_id,
+                self.qualification_id,
+                is_sandbox=self.opt['is_sandbox'],
+            )
         self.mturk_agent.shutdown()
 
     def review_work(self):

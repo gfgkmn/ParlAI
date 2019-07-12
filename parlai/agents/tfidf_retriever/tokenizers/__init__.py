@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
-# Copyright 2017-present, Facebook, Inc.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
 import os
+from .regexp_tokenizer import RegexpTokenizer
+from .simple_tokenizer import SimpleTokenizer
 
-DEFAULTS = {
-    'corenlp_classpath': os.getenv('CLASSPATH')
-}
+# need DEFAULTS defined before this import
+DEFAULTS = {'corenlp_classpath': os.getenv('CLASSPATH')}
+from .corenlp_tokenizer import CoreNLPTokenizer  # noqa: E402
 
 
 def set_default(key, value):
     global DEFAULTS
     DEFAULTS[key] = value
 
-
-from .corenlp_tokenizer import CoreNLPTokenizer
-from .regexp_tokenizer import RegexpTokenizer
-from .simple_tokenizer import SimpleTokenizer
 
 # Spacy is optional
 try:

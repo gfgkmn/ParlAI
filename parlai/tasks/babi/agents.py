@@ -1,11 +1,11 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from parlai.core.teachers import FbDialogTeacher
-from parlai.core.agents import MultiTaskTeacher
+import parlai.core.agents as core_agents
 from .build import build
 
 import copy
@@ -17,9 +17,13 @@ def _path(exsz, task, opt, dt=''):
     build(opt)
     if dt == '':
         dt = opt['datatype'].split(':')[0]
-    return os.path.join(opt['datapath'], 'bAbI', 'tasks_1-20_v1-2',
-                        'en-valid{exsz}-nosf'.format(exsz=exsz),
-                        'qa{task}_{type}.txt'.format(task=task, type=dt))
+    return os.path.join(
+        opt['datapath'],
+        'bAbI',
+        'tasks_1-20_v1-2',
+        'en-valid{exsz}-nosf'.format(exsz=exsz),
+        'qa{task}_{type}.txt'.format(task=task, type=dt),
+    )
 
 
 def mod_labels(ys, task):
@@ -76,7 +80,7 @@ class Task10kTeacher(FbDialogTeacher):
 
 
 # By default train on all tasks at once.
-class All1kTeacher(MultiTaskTeacher):
+class All1kTeacher(core_agents.MultiTaskTeacher):
     def __init__(self, opt, shared=None):
         opt = copy.deepcopy(opt)
         opt['task'] = ','.join('babi:Task1k:%d' % (i + 1) for i in range(20))
@@ -84,7 +88,7 @@ class All1kTeacher(MultiTaskTeacher):
 
 
 # By default train on all tasks at once.
-class All10kTeacher(MultiTaskTeacher):
+class All10kTeacher(core_agents.MultiTaskTeacher):
     def __init__(self, opt, shared=None):
         opt = copy.deepcopy(opt)
         opt['task'] = ','.join('babi:Task10k:%d' % (i + 1) for i in range(20))

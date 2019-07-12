@@ -1,13 +1,17 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 from parlai.core.worlds import validate
 from parlai.mturk.core.worlds import MTurkOnboardWorld, MTurkTaskWorld
 
 
 class QADataCollectionOnboardWorld(MTurkOnboardWorld):
+    '''Example onboarding world. Sends a message from the world to the
+    worker and then exits as complete
+    '''
+
     def parley(self):
         ad = {}
         ad['id'] = 'System'
@@ -31,6 +35,9 @@ class QADataCollectionWorld(MTurkTaskWorld):
         self.mturk_agent = mturk_agent
         self.episodeDone = False
         self.turn_index = -1
+        self.context = None
+        self.question = None
+        self.answer = None
 
     def parley(self):
         # Each turn starts from the QA Collector agent
@@ -44,11 +51,12 @@ class QADataCollectionWorld(MTurkTaskWorld):
 
             # Get context from SQuAD teacher agent
             qa = self.task.act()
-            context = '\n'.join(qa['text'].split('\n')[:-1])
+            self.context = '\n'.join(qa['text'].split('\n')[:-1])
 
             # Wrap the context with a prompt telling the turker what to do next
-            ad['text'] = (context +
-                          '\n\nPlease provide a question given this context.')
+            ad['text'] = (
+                self.context + '\n\nPlease provide a question given this context.'
+            )
 
             self.mturk_agent.observe(validate(ad))
             self.question = self.mturk_agent.act()
@@ -66,19 +74,22 @@ class QADataCollectionWorld(MTurkTaskWorld):
 
             self.mturk_agent.observe(validate(ad))
             self.answer = self.mturk_agent.act()
-            # Can log the turker's answer here
 
             self.episodeDone = True
 
     def episode_done(self):
         return self.episodeDone
 
-    def report(self):
-        pass
-
     def shutdown(self):
         self.task.shutdown()
         self.mturk_agent.shutdown()
 
     def review_work(self):
+        # Can review the work here to accept or reject it
         pass
+
+    def get_custom_task_data(self):
+        # brings important data together for the task, to later be used for
+        # creating the dataset. If data requires pickling, put it in a field
+        # called 'needs-pickle'.
+        return {'context': self.context, 'acts': [self.question, self.answer]}

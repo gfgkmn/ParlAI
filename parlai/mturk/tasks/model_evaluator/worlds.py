@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 from parlai.core.worlds import validate, create_task
 from parlai.mturk.core.worlds import MTurkTaskWorld, MTurkOnboardWorld
 
@@ -38,9 +38,11 @@ class ModelEvaluatorWorld(MTurkTaskWorld):
         # to rate the response
         ad['id'] = self.__class__.evaluator_agent_id
         ad['text'] = (
-            self.task_world.get_acts()[0]['text'] + "\n\n" +
-            "How would you rate the following response (from 0 to 10):\n\n" +
-            self.task_world.get_acts()[1]['text'])
+            self.task_world.get_acts()[0]['text']
+            + "\n\n"
+            + "How would you rate the following response (from 0 to 10):\n\n"
+            + self.task_world.get_acts()[1]['text']
+        )
 
         # TODO: deal with multi-turn dialogs, for now we will just deal
         # with 1-turn dialogs in this task.

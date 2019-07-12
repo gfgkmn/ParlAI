@@ -7,7 +7,6 @@ This directory contains a few particular examples of basic loops.
 - display_model.py: _shows the predictions of a provided model on a particular task provided on the command-line_
 - eval_model.py: _uses the named agent to compute evaluation metrics data for a particular task provided on the command-line_
 - build_dict.py: _build a dictionary from a particular task provided on the command-line using core.dict.DictionaryAgent_
-- memnn_luatorch_cpu: _shows a few examples of training an end-to-end memory network on a few datasets_
 
 ## Running These Examples
 
@@ -25,7 +24,7 @@ python base_train.py -t babi:task1k:1
 
 Displays 100 random examples from multi-tasking on the bAbI task and the SQuAD dataset at the same time:
 ```bash
-python display_data.py -t babi:task1k:1,squad -n 100
+python display_data.py -t babi:task1k:1,squad -ne 100
 ```
 
 Evaluate on the bAbI test set with a human agent (using the local keyboard as input):
@@ -50,7 +49,7 @@ python build_dict.py -t babi:task1k:1 --dict-file /tmp/dict.tsv
 
 Train a simple sequence to sequence model on the "1k training examples" bAbI task 1 with batch size of 8 examples for one epoch (requires pytorch):
 ```bash
-python train_model.py -m seq2seq -t babi:task1k:1 -bs 8 -e 1 -mf /tmp/model_s2s
+python train_model.py -m seq2seq -t babi:task1k:1 -bs 8 -eps 1 -mf /tmp/model_s2s
 ```
 
 Trains an attentive LSTM model of [Chen et al.](https://arxiv.org/abs/1704.00051) on the SQuAD dataset with a batch size of 32 examples (requires pytorch):
@@ -60,12 +59,10 @@ python train_model.py -m drqa -t squad -bs 32 -mf /tmp/model_drqa
 
 Evaluates on an already trained SQuAD model:
 ```bash
-wget https://s3.amazonaws.com/fair-data/parlai/_models/drqa/squad.mdl
-python eval_model.py -m drqa -t squad -mf squad.mdl -dt valid
+python eval_model.py -t squad -mf "models:drqa/squad/model"
 ```
 
 Interactive session on an already trained SQuAD model:
 ```bash
-wget https://s3.amazonaws.com/fair-data/parlai/_models/drqa/squad.mdl
-python interactive.py -m drqa -mf squad.mdl
+python interactive.py -mf "models:drqa/squad/model"
 ```

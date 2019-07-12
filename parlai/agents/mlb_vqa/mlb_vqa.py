@@ -1,12 +1,10 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from parlai.core.agents import Agent
 
-from torch.autograd import Variable
 import torch.nn as nn
 import torch
 import os
@@ -31,26 +29,23 @@ from .mlb_modules import MlbAtt, MlbNoAtt
     To train the model using the `PytorchDataTeacher` on VQA V1, use the
     following command:
 
-        `python examples/train_model.py -m mlb_vqa -t pytorch_teacher \
-        --pytorch-buildteacher vqa_v1 -mf <model_file> \
-        --dataset parlai.tasks.vqa_v1.agents -bs <batchsize> \
+        `python examples/train_model.py -m mlb_vqa -pytd vqa_v1  \
+        -mf <model_file> -bs <batchsize> \
         -im resnet152_spatial --image-size 448 --image-cropsize 448`
 
     Where you fill in `<model_file>` and `<batchsize>` with
     your own values; e.g.:
 
-        `python examples/train_model.py -m mlb_vqa -t pytorch_teacher \
-        --pytorch-buildteacher vqa_v1 -mf mlb \
-        --dataset parlai.tasks.vqa_v1.agents -bs 512 \
-        -im resnet152_spatial --image-size 448 --image-cropsize 448`
+        `python examples/train_model.py -m mlb_vqa -pytd vqa_v1 -mf mlb \
+        -bs 512 -im resnet152_spatial --image-size 448 --image-cropsize 448`
 
     This will also download and extract the image features on the fly.
 
     If you would like to extract the image features prior to training, run the
     following command (where `-dt` can be either 'train', 'valid', or 'test'):
-        `python examples/extract_image_feature.py -t vqa_v1 \
+        `python examples/extract_image_feature.py -pytd vqa_v1\
         -im resnet152_spatial --image-size 448 --image-cropsize 448 \
-        --dataset parlai.tasks.vqa_v1.agents -dt <datatype>`
+        -dt <datatype>`
 
     For faster training, specify '--no-metrics,' which prevents computation
     of f1 score and accuracy
@@ -77,21 +72,25 @@ def unescape(s):
 
 
 class VqaDictionaryAgent(Agent):
-
     @staticmethod
     def add_cmdline_args(argparser):
         dictionary = argparser.add_argument_group('Dictionary Arguments')
         dictionary.add_argument(
             '--dict-file',
-            help='if set, the dictionary will automatically save to this path' +
-                 ' during shutdown')
+            help='if set, the dictionary will automatically save to this path'
+            + ' during shutdown',
+        )
         dictionary.add_argument(
             '--dict-initpath',
-            help='path to a saved dictionary to load tokens / counts from to ' +
-                 'seed the dictionary with initial tokens and/or frequencies')
+            help='path to a saved dictionary to load tokens / counts from to '
+            + 'seed the dictionary with initial tokens and/or frequencies',
+        )
         dictionary.add_argument(
-            '--dict-maxexs', default=300000, type=int,
-            help='max number of examples to build dict on')
+            '--dict-maxexs',
+            default=300000,
+            type=int,
+            help='max number of examples to build dict on',
+        )
         dictionary.add_argument('-smp', '--samplingans', type='bool', default=True)
         dictionary.add_argument('--nans', type=int, default=2000)
         dictionary.add_argument('--maxlength', type=int, default=16)
@@ -146,6 +145,9 @@ class VqaDictionaryAgent(Agent):
             if opt.get('dict_file'):
                 self.save_path = opt['dict_file']
 
+    def __len__(self):
+        return len(self.tok2ind)
+
     def add_to_ques_dict(self, tokens):
         """Builds dictionary from the list of provided tokens.
         Only adds words contained in self.embedding_words, if not None.
@@ -169,40 +171,63 @@ class VqaDictionaryAgent(Agent):
 
     def tokenize_mcb(self, s):
         t_str = s.lower()
-        for i in [r'\?',r'\!',r'\'',r'\"',r'\$',r'\:',r'\@',r'\(',r'\)',r'\,',r'\.',r'\;']:
-            t_str = re.sub( i, '', t_str)
-        for i in [r'\-',r'\/']:
-            t_str = re.sub( i, ' ', t_str)
-        q_list = re.sub(r'\?','',t_str.lower()).split(' ')
+        for i in [
+            r'\?',
+            r'\!',
+            r'\'',
+            r'\"',
+            r'\$',
+            r'\:',
+            r'\@',
+            r'\(',
+            r'\)',
+            r'\,',
+            r'\.',
+            r'\;',
+        ]:
+            t_str = re.sub(i, '', t_str)
+        for i in [r'\-', r'\/']:
+            t_str = re.sub(i, ' ', t_str)
+        q_list = re.sub(r'\?', '', t_str.lower()).split(' ')
         q_list = list(filter(lambda x: len(x) > 0, q_list))
         return q_list
 
-
     def split_tokenize(self, s):
-        return (s.lower().replace('.', ' . ').replace('. . .', '...')
-                .replace(',', ' , ').replace(';', ' ; ').replace(':', ' : ')
-                .replace('!', ' ! ').replace('?', ' ? ')
-                .split())
+        return (
+            s.lower()
+            .replace('.', ' . ')
+            .replace('. . .', '...')
+            .replace(',', ' , ')
+            .replace(';', ' ; ')
+            .replace(':', ' : ')
+            .replace('!', ' ! ')
+            .replace('?', ' ? ')
+            .split()
+        )
 
     def act(self):
         """Add any words passed in the 'text' field of the observation to this
         dictionary.
         """
-        for text in self.observation.get('mc_label', self.observation.get('labels', [])):
+        mc_label = self.observation.get('mc_label', self.observation.get('labels', []))
+        for text in mc_label:
             self.ansfreq[text] += 1
             self.ans2ques[text].append(self.tokenize_mcb(self.observation.get('text')))
         return {'id': 'Dictionary'}
 
     def encode_question(self, examples, training):
-        minwcount = self.opt['minwcount']
-        maxlength = self.opt['maxlength']
+        minwcount = self.opt.get('minwcount', 0)
+        maxlength = self.opt.get('maxlength', 16)
         for ex in examples:
             words = self.tokenize_mcb(ex['text'])
             if training:
-                words_unk = [w if self.freq.get(w, 0) > minwcount else self.unk_token for w in words]
+                words_unk = [
+                    w if self.freq.get(w, 0) > minwcount else self.unk_token
+                    for w in words
+                ]
             else:
                 words_unk = [w if w in self.tok2ind else self.unk_token for w in words]
-            ex['question_wids'] = [self.tok2ind[self.null_token]]*maxlength
+            ex['question_wids'] = [self.tok2ind[self.null_token]] * maxlength
             for k, w in enumerate(words_unk):
                 if k < maxlength:
                     ex['question_wids'][k] = self.tok2ind[w]
@@ -210,8 +235,9 @@ class VqaDictionaryAgent(Agent):
 
     def encode_answer(self, examples):
         for ex in examples:
-            if self.opt['samplingans']:
-                ans_count = Counter(ex['labels']).most_common()
+            if self.opt.get('samplingans', True):
+                labels = ex.get('labels', ex.get('eval_labels'))
+                ans_count = Counter(labels).most_common()
                 valid_ans = []
                 valid_count = []
                 for ans in ans_count:
@@ -251,12 +277,12 @@ class VqaDictionaryAgent(Agent):
                     self.ind2tok[index] = token
         print('[ num ques words =  %d ]' % len(self.ind2tok))
 
-        with open(filename[:-5]+"_ans.dict") as read:
+        with open(filename[:-5] + "_ans.dict") as read:
             for line in read:
                 split = line.strip().split('\t')
                 token = unescape(split[0])
                 cnt = int(split[1]) if len(split) > 1 else 0
-                self.ansfreq = cnt
+                self.ansfreq[token] = cnt
                 if token not in self.ans2ind:
                     index = len(self.ans2ind)
                     self.ans2ind[token] = index
@@ -275,15 +301,15 @@ class VqaDictionaryAgent(Agent):
         If ``sort`` (default ``True``), then first sort the dictionary before
         saving.
         """
-        cw = sorted([(count,w) for w,count in self.ansfreq.items()], reverse=True)
-        final_exs = cw[:self.opt['nans']]
-        final_list = dict([(w,c) for c,w in final_exs])
+        cw = sorted([(count, w) for w, count in self.ansfreq.items()], reverse=True)
+        final_exs = cw[: self.opt.get('nans', 2000)]
+        final_list = dict([(w, c) for c, w in final_exs])
         self.ansfreq = defaultdict(int)
-        for ans,ques in self.ans2ques.items():
+        for ans, ques in self.ans2ques.items():
             if ans in final_list:
                 for que in ques:
                     self.add_to_ques_dict(que)
-                    self.add_to_ans_dict(ans)
+                self.add_to_ans_dict(ans)
 
         filename = self.opt['dict_file'] if filename is None else filename
         print('Dictionary: saving dictionary to {}'.format(filename))
@@ -296,7 +322,7 @@ class VqaDictionaryAgent(Agent):
                 cnt = self.freq[tok]
                 write.write('{tok}\t{cnt}\n'.format(tok=escape(tok), cnt=cnt))
 
-        with open(filename[:-5]+"_ans.dict", 'a' if append else 'w') as write:
+        with open(filename[:-5] + "_ans.dict", 'a' if append else 'w') as write:
             for i in range(len(self.ind2ans)):
                 tok = self.ind2ans[i]
                 cnt = self.ansfreq[tok]
@@ -309,7 +335,6 @@ class VqaDictionaryAgent(Agent):
 
 
 class MlbVqaAgent(Agent):
-
     @staticmethod
     def add_cmdline_args(argparser):
         """Add command-line arguments specifically for this agent."""
@@ -336,18 +361,28 @@ class MlbVqaAgent(Agent):
         agent.add_argument('--num_glimpses', type=int, default=4)
         agent.add_argument('--original_att', action='store_true')
         agent.add_argument('--lr', type=float, default=0.0001)
-        agent.add_argument('--no-cuda', action='store_true',
-                           help='disable GPUs even if available')
-        agent.add_argument('--gpu', type=int, default=0,
-                           help='which GPU device to use')
-        agent.add_argument('--no-data-parallel', action='store_true',
-                           help='disable pytorch parallel data processing')
-        agent.add_argument('--no-hdf5', action='store_true',
-                           help='specify to not use a single hdf5 file to load \
-                           images')
-        agent.add_argument('--no-metrics', action='store_true',
-                           help='specify to not compute f1 or accuracy during \
-                           training (speeds up training)')
+        agent.add_argument(
+            '--no-cuda', action='store_true', help='disable GPUs even if available'
+        )
+        agent.add_argument('--gpu', type=int, default=0, help='which GPU device to use')
+        agent.add_argument(
+            '--no-data-parallel',
+            action='store_true',
+            help='disable pytorch parallel data processing',
+        )
+        agent.add_argument(
+            '--use-hdf5',
+            type='bool',
+            default=False,
+            help='specify whether to use a single hdf5 file to load \
+                           images',
+        )
+        agent.add_argument(
+            '--no-metrics',
+            action='store_true',
+            help='specify to not compute f1 or accuracy during \
+                           training (speeds up training)',
+        )
         MlbVqaAgent.dictionary_class().add_cmdline_args(argparser)
 
     @staticmethod
@@ -395,21 +430,11 @@ class MlbVqaAgent(Agent):
                     self.model.cuda()
                 self.criterion.cuda()
             if self.use_cuda and self.use_data_parallel:
-                self.optims = self.model.module.get_optims()
+                self.optim = self.model.module.get_optim()
             else:
-                self.optims = self.model.get_optims()
+                self.optim = self.model.get_optim()
 
         self.reset()
-
-    def zero_grad(self):
-        """Zero out optimizers."""
-        for optimizer in self.optims.values():
-            optimizer.zero_grad()
-
-    def update_params(self):
-        """Do one optimization step."""
-        for optimizer in self.optims.values():
-            optimizer.step()
 
     def reset(self):
         """Reset observation and episode_done."""
@@ -437,6 +462,16 @@ class MlbVqaAgent(Agent):
         # Get appropriate dims
         first_ex = batch[0][1][0]
 
+        # If we are building the dictionary
+        if 'image' not in first_ex or first_ex['image'] is None:
+            new_batch = []
+            for b in batch:
+                if type(b[1]) is list:
+                    ep = b[1][0]
+                else:
+                    ep = b[1]
+                new_batch.append(ep)
+            return new_batch
         img_var = torch.FloatTensor(first_ex['image'])
         use_att = first_ex['use_att']
         use_hdf5 = first_ex['use_hdf5']
@@ -482,22 +517,22 @@ class MlbVqaAgent(Agent):
             ep_dones.append(ex['episode_done'])
 
         data = {
-            'input_v': MlbVqaAgent.static_vis_noatt(input_v, use_att, use_hdf5=use_hdf5),
+            'input_v': MlbVqaAgent.static_vis_noatt(
+                input_v, use_att, use_hdf5=use_hdf5
+            ),
             'input_q': input_q,
             'valid_inds': valid_inds,
             'batchsize': batchsize,
             'labels': labels[0],
             'episode_done': ep_dones[0],
-            'preprocessed': True
+            'preprocessed': True,
         }
         if not testing:
             data['answer'] = answer
-        return [
-            data
-        ] + [{
-                'labels': ex_label,
-                'episode_done': ep_done,
-                'preprocessed': True} for ex_label, ep_done in zip(labels[1:], ep_dones[1:])]
+        return [data] + [
+            {'labels': ex_label, 'episode_done': ep_done, 'preprocessed': True}
+            for ex_label, ep_done in zip(labels[1:], ep_dones[1:])
+        ]
 
     def process_obs(self, observations):
         if any('text' not in ex for ex in observations):
@@ -506,49 +541,33 @@ class MlbVqaAgent(Agent):
             return None
         new_obs = []
         valid_inds = []
-        gotshape = False
+        mc = False
         for i, ex in enumerate(observations):
-            if not self.use_cuda and not gotshape:
-                img_var = ex['image']
-                height = img_var.size(2)
-                width = img_var.size(3)
-                gotshape = True
-            elif self.use_cuda:
-                ex['image'] = ex['image'].cuda(async=True)
+            if self.use_cuda:
+                ex['image'] = ex['image'].cuda()
             if 'mc_label' in ex:
                 self.training = True
                 if ex['mc_label'][0] in self.dict.ans2ind:
+                    mc = True
                     new_obs.append(ex)
                     valid_inds.append(i)
 
-        if not self.training:
+        if not self.training or not mc:
             new_obs = observations.copy()
             valid_inds = range(len(new_obs))
-        batchsize = len(new_obs)
 
         if not self.testing:
             new_obs = self.dict.encode_question(new_obs, self.training)
-            new_obs = self.dict.encode_answer(new_obs)
-            if not self.use_cuda:
-                answer = torch.LongTensor(batchsize).fill_(0)
+            if self.training:
+                new_obs = self.dict.encode_answer(new_obs)
         else:
             new_obs = self.dict.encode_question(new_obs, False)
             answer = None
 
-        if not self.use_cuda:
-            input_v = torch.FloatTensor(batchsize, self.opt['dim_v'], height, width).fill_(0)
-            input_q = torch.LongTensor(batchsize, self.opt['maxlength']).fill_(0)
-
-            for i, ex in enumerate(new_obs):
-                input_v[i] = ex['image']
-                input_q[i] = torch.LongTensor(ex['question_wids'])
-                if not self.testing:
-                    answer[i] = ex['answer_aid']
-        else:
-            input_v = torch.stack([ex['image'][0] for ex in new_obs])
-            input_q = torch.stack([torch.LongTensor(ex['question_wids']) for ex in new_obs])
-            if not self.testing:
-                answer = torch.LongTensor([ex['answer_aid'] for ex in new_obs])
+        input_v = torch.stack([ex['image'][0] for ex in new_obs])
+        input_q = torch.stack([torch.LongTensor(ex['question_wids']) for ex in new_obs])
+        if not self.testing:
+            answer = torch.LongTensor([ex['answer_aid'] for ex in new_obs])
 
         return {
             'input_v': MlbVqaAgent.static_vis_noatt(input_v, self.opt['attention']),
@@ -576,18 +595,10 @@ class MlbVqaAgent(Agent):
 
         if self.use_cuda:
             if not self.use_data_parallel:
-                input_v = Variable(input_v.cuda(async=True))
-                input_q = Variable(input_q.cuda(async=True))
-            else:
-                input_v = Variable(input_v)
-                input_q = Variable(input_q)
+                input_v = input_v.cuda()
+                input_q = input_q.cuda()
             if not self.testing:
-                answer = Variable(answer.cuda(async=True))
-        else:
-            input_v = Variable(input_v)
-            input_q = Variable(input_q)
-            if not self.testing:
-                answer = Variable(answer)
+                answer = answer.cuda()
 
         return input_v, input_q, answer, valid_inds
 
@@ -597,10 +608,10 @@ class MlbVqaAgent(Agent):
         if label is not None:
             torch.cuda.synchronize()
             loss = self.criterion(out, label)
-            self.zero_grad()
+            self.optim.zero_grad()
             loss.backward()
             torch.cuda.synchronize()
-            self.update_params()
+            self.optim.step()
             torch.cuda.synchronize()
 
         return loss, out
@@ -615,14 +626,12 @@ class MlbVqaAgent(Agent):
 
         loss, predictions = self.predict(input_v, input_q, answer)
         if loss is not None:
-            batch_reply[0]['metrics'] = {'loss': loss.data[0]}
+            batch_reply[0]['metrics'] = {'loss': loss.item()}
         if not self.training or self.compute_metrics:
-            if not self.use_cuda:
-                _, predictions = predictions.data.cpu().max(1)
-            else:
-                _, predictions = predictions.data.max(1)
-            predictions.squeeze_()
-            tpreds = self.dict.decode_answer(predictions)
+            _, predictions = predictions.max(1)
+            if predictions.size(0) > 1:
+                predictions.squeeze_(0)
+            tpreds = self.dict.decode_answer(predictions.tolist())
             for i in range(len(tpreds)):
                 # map the predictions back to non-empty examples in the batch
                 curr = batch_reply[valid_inds[i]]
@@ -640,14 +649,28 @@ class MlbVqaAgent(Agent):
         Print out each added key and each overriden key.
         Only override args specific to the model.
         """
-        model_args = {'dim_v', 'dim_q', 'dim_h', 'dim_att_h',
-                      'dropout_cls', 'dropout_st', 'dropout_q',
-                      'dropout_v', 'dropout_att_mm',
-                      'dropout_att_q', 'dropout_att_v',
-                      'activation_cls', 'activation_q',
-                      'activation_v', 'activation_att_mm',
-                      'activation_att_q', 'activation_att_v',
-                      'num_glimpses', 'use_bayesian', 'attention'}
+        model_args = {
+            'dim_v',
+            'dim_q',
+            'dim_h',
+            'dim_att_h',
+            'dropout_cls',
+            'dropout_st',
+            'dropout_q',
+            'dropout_v',
+            'dropout_att_mm',
+            'dropout_att_q',
+            'dropout_att_v',
+            'activation_cls',
+            'activation_q',
+            'activation_v',
+            'activation_att_mm',
+            'activation_att_q',
+            'activation_att_v',
+            'num_glimpses',
+            'use_bayesian',
+            'attention',
+        }
         for k, v in new_opt.items():
             if k not in model_args:
                 # skip non-model args
@@ -655,8 +678,11 @@ class MlbVqaAgent(Agent):
             if k not in self.opt:
                 print('Adding new option [ {k}: {v} ]'.format(k=k, v=v))
             elif self.opt[k] != v:
-                print('Overriding option [ {k}: {old} => {v}]'.format(
-                      k=k, old=self.opt[k], v=v))
+                print(
+                    'Overriding option [ {k}: {old} => {v}]'.format(
+                        k=k, old=self.opt[k], v=v
+                    )
+                )
             self.opt[k] = v
         return self.opt
 
@@ -669,8 +695,7 @@ class MlbVqaAgent(Agent):
 
     def load(self, path):
         """Return opt and model states."""
-        with open(path, 'rb') as read:
-            model = torch.load(read)
+        model = torch.load(path, map_location=lambda cpu, _: cpu)
         return model
 
     def shutdown(self):

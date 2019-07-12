@@ -1,15 +1,17 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 import os
 from parlai.core.params import ParlaiParser
 from parlai.mturk.core.mturk_manager import MTurkManager
-from parlai.mturk.tasks.multi_agent_dialog.worlds import \
-    MTurkMultiAgentDialogWorld, MTurkMultiAgentDialogOnboardWorld
+from parlai.mturk.tasks.multi_agent_dialog.worlds import (
+    MTurkMultiAgentDialogWorld,
+    MTurkMultiAgentDialogOnboardWorld,
+)
 from parlai.agents.local_human.local_human import LocalHumanAgent
-from task_config import task_config
+from parlai.mturk.tasks.multi_agent_dialog.task_config import task_config
 
 
 def main():
@@ -31,10 +33,7 @@ def main():
     mturk_agent_2_id = 'mturk_agent_2'
     human_agent_1_id = 'human_1'
     mturk_agent_ids = [mturk_agent_1_id, mturk_agent_2_id]
-    mturk_manager = MTurkManager(
-        opt=opt,
-        mturk_agent_ids=mturk_agent_ids
-    )
+    mturk_manager = MTurkManager(opt=opt, mturk_agent_ids=mturk_agent_ids)
     mturk_manager.setup_server()
 
     try:
@@ -42,10 +41,7 @@ def main():
         mturk_manager.create_hits()
 
         def run_onboard(worker):
-            world = MTurkMultiAgentDialogOnboardWorld(
-                opt=opt,
-                mturk_agent=worker
-            )
+            world = MTurkMultiAgentDialogOnboardWorld(opt=opt, mturk_agent=worker)
             while not world.episode_done():
                 world.parley()
             world.shutdown()
@@ -57,10 +53,7 @@ def main():
         def check_worker_eligibility(worker):
             return True
 
-        eligibility_function = {
-            'func': check_worker_eligibility,
-            'multiple': False,
-        }
+        eligibility_function = {'func': check_worker_eligibility, 'multiple': False}
 
         def assign_worker_roles(workers):
             for index, worker in enumerate(workers):
@@ -72,12 +65,11 @@ def main():
             mturk_agent_2 = workers[1]
 
             # Create the local human agents
-            human_agent_1 = LocalHumanAgent(opt=None)
+            human_agent_1 = LocalHumanAgent(opt={})
             human_agent_1.id = human_agent_1_id
 
             world = MTurkMultiAgentDialogWorld(
-                opt=opt,
-                agents=[human_agent_1, mturk_agent_1, mturk_agent_2]
+                opt=opt, agents=[human_agent_1, mturk_agent_1, mturk_agent_2]
             )
 
             while not world.episode_done():
@@ -88,7 +80,7 @@ def main():
         mturk_manager.start_task(
             eligibility_function=eligibility_function,
             assign_role_function=assign_worker_roles,
-            task_function=run_conversation
+            task_function=run_conversation,
         )
 
     except BaseException:
@@ -96,6 +88,7 @@ def main():
     finally:
         mturk_manager.expire_all_unassigned_hits()
         mturk_manager.shutdown()
+
 
 if __name__ == '__main__':
     main()

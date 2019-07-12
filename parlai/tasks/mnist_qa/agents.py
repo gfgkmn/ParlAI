@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 """This is a simple question answering task on the MNIST dataset.
 In each episode, agents are presented with a number, which they are asked to
@@ -34,13 +34,24 @@ class MnistQATeacher(DialogTeacher):
     inherit basic metrics, a `act` function, and enables
     Hogwild training with shared memory with no extra work.
     """
+
     def __init__(self, opt, shared=None):
         self.datatype = opt['datatype'].split(':')[0]
         labels_path, self.image_path = _path(opt)
         opt['datafile'] = labels_path
         self.id = 'mnist_qa'
-        self.num_strs = ['zero', 'one', 'two', 'three', 'four', 'five',
-                'six', 'seven', 'eight', 'nine']
+        self.num_strs = [
+            'zero',
+            'one',
+            'two',
+            'three',
+            'four',
+            'five',
+            'six',
+            'seven',
+            'eight',
+            'nine',
+        ]
 
         super().__init__(opt, shared)
 

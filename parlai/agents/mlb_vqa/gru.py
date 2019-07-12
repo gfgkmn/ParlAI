@@ -1,18 +1,16 @@
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 from .dropout import SequentialDropout
 
 
 class AbstractGRUCell(nn.Module):
-
-    def __init__(self, input_size, hidden_size,
-                 bias_ih=True, bias_hh=False):
+    def __init__(self, input_size, hidden_size, bias_ih=True, bias_hh=False):
         super(AbstractGRUCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -32,15 +30,12 @@ class AbstractGRUCell(nn.Module):
 
 
 class GRUCell(AbstractGRUCell):
-
-    def __init__(self, input_size, hidden_size,
-                 bias_ih=True, bias_hh=False):
-        super(GRUCell, self).__init__(input_size, hidden_size,
-                                      bias_ih, bias_hh)
+    def __init__(self, input_size, hidden_size, bias_ih=True, bias_hh=False):
+        super(GRUCell, self).__init__(input_size, hidden_size, bias_ih, bias_hh)
 
     def forward(self, x, hx=None):
         if hx is None:
-            hx = Variable(x.data.new().resize_((x.size(0), self.hidden_size)).fill_(0))
+            hx = x.new().resize_((x.size(0), self.hidden_size).fill_(0))
         r = F.sigmoid(self.weight_ir(x) + self.weight_hr(hx))
         i = F.sigmoid(self.weight_ii(x) + self.weight_hi(hx))
         n = F.tanh(self.weight_in(x) + r * self.weight_hn(hx))
@@ -49,11 +44,10 @@ class GRUCell(AbstractGRUCell):
 
 
 class BayesianGRUCell(AbstractGRUCell):
-    def __init__(self, input_size, hidden_size,
-                 bias_ih=True, bias_hh=False,
-                 dropout=0.25):
-        super(BayesianGRUCell, self).__init__(input_size, hidden_size,
-                                              bias_ih, bias_hh)
+    def __init__(
+        self, input_size, hidden_size, bias_ih=True, bias_hh=False, dropout=0.25
+    ):
+        super(BayesianGRUCell, self).__init__(input_size, hidden_size, bias_ih, bias_hh)
         self.set_dropout(dropout)
 
     def set_dropout(self, dropout):
@@ -75,7 +69,7 @@ class BayesianGRUCell(AbstractGRUCell):
 
     def forward(self, x, hx=None):
         if hx is None:
-            hx = Variable(x.data.new().resize_((x.size(0), self.hidden_size)).fill_(0))
+            hx = x.new().resize_((x.size(0), self.hidden_size)).fill_(0)
         x_ir = self.drop_ir(x)
         x_ii = self.drop_ii(x)
         x_in = self.drop_in(x)
@@ -90,9 +84,7 @@ class BayesianGRUCell(AbstractGRUCell):
 
 
 class AbstractGRU(nn.Module):
-
-    def __init__(self, input_size, hidden_size,
-                 bias_ih=True, bias_hh=False):
+    def __init__(self, input_size, hidden_size, bias_ih=True, bias_hh=False):
         super(AbstractGRU, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -117,30 +109,30 @@ class AbstractGRU(nn.Module):
 
 
 class GRU(AbstractGRU):
-
-    def __init__(self, input_size, hidden_size,
-                 bias_ih=True, bias_hh=False):
-        super(GRU, self).__init__(input_size, hidden_size,
-                                  bias_ih, bias_hh)
+    def __init__(self, input_size, hidden_size, bias_ih=True, bias_hh=False):
+        super(GRU, self).__init__(input_size, hidden_size, bias_ih, bias_hh)
 
     def _load_gru_cell(self):
-        self.gru_cell = GRUCell(self.input_size, self.hidden_size,
-                                self.bias_ih, self.bias_hh)
+        self.gru_cell = GRUCell(
+            self.input_size, self.hidden_size, self.bias_ih, self.bias_hh
+        )
 
 
 class BayesianGRU(AbstractGRU):
-
-    def __init__(self, input_size, hidden_size,
-                 bias_ih=True, bias_hh=False,
-                 dropout=0.25):
+    def __init__(
+        self, input_size, hidden_size, bias_ih=True, bias_hh=False, dropout=0.25
+    ):
         self.dropout = dropout
-        super(BayesianGRU, self).__init__(input_size, hidden_size,
-                                          bias_ih, bias_hh)
+        super(BayesianGRU, self).__init__(input_size, hidden_size, bias_ih, bias_hh)
 
     def _load_gru_cell(self):
-        self.gru_cell = BayesianGRUCell(self.input_size, self.hidden_size,
-                                        self.bias_ih, self.bias_hh,
-                                        dropout=self.dropout)
+        self.gru_cell = BayesianGRUCell(
+            self.input_size,
+            self.hidden_size,
+            self.bias_ih,
+            self.bias_hh,
+            dropout=self.dropout,
+        )
 
     def set_dropout(self, dropout):
         self.dropout = dropout

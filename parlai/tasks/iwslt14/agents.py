@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from parlai.core.teachers import DialogTeacher
 from .build import build
@@ -33,6 +33,7 @@ class DefaultTeacher(DialogTeacher):
             task_name = task.split(':')[1]
         source, target = task_name.split('_')
         opt['datafile'] = _path(opt, source, target)
+
         super().__init__(opt, shared)
 
     def setup_data(self, path):

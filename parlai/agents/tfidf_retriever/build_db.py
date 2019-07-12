@@ -1,23 +1,18 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 """A script to read in and store ParlAI tasks in a sqlite database.
 
 Adapted from Adam Fisch's work at github.com/facebookresearch/DrQA/
 """
 
-import argparse
 import sqlite3
-import json
 import os
 import logging
-import importlib.util
 
-from multiprocessing import Pool as ProcessPool
 from tqdm import tqdm
-from . import utils
 
 from collections import deque
 import random
@@ -33,6 +28,7 @@ logger.addHandler(console)
 # ------------------------------------------------------------------------------
 # Store corpus.
 # ------------------------------------------------------------------------------
+
 
 def store_contents(opt, task, save_path, context_length=-1, include_labels=True):
     """Preprocess and store a corpus of documents in sqlite.
@@ -96,8 +92,7 @@ def store_contents(opt, task, save_path, context_length=-1, include_labels=True)
                 # ever reverse-lookup them
                 triples.append((None, text, label))
 
-            c.executemany('INSERT OR IGNORE INTO documents VALUES (?,?,?)',
-                          triples)
+            c.executemany('INSERT OR IGNORE INTO documents VALUES (?,?,?)', triples)
             pbar.update()
 
             # reset flags and content
@@ -106,8 +101,10 @@ def store_contents(opt, task, save_path, context_length=-1, include_labels=True)
             current.clear()
             context.clear()
 
-    logger.info('Read %d examples from %d episodes.' % (
-        teacher.num_examples(), teacher.num_episodes()))
+    logger.info(
+        'Read %d examples from %d episodes.'
+        % (teacher.num_examples(), teacher.num_episodes())
+    )
     logger.info('Committing...')
     conn.commit()
     conn.close()

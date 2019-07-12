@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from parlai.core.teachers import DialogTeacher
 from .build import build
@@ -21,8 +21,9 @@ def _path(opt):
         raise RuntimeError('Not valid datatype.')
 
     prefix = os.path.join(opt['datapath'], 'CLEVR', 'CLEVR_v1.0')
-    questions_path = os.path.join(prefix, 'questions',
-                                'CLEVR_' + dt + '_questions.json')
+    questions_path = os.path.join(
+        prefix, 'questions', 'CLEVR_' + dt + '_questions.json'
+    )
     images_path = os.path.join(prefix, 'images', dt)
 
     return questions_path, images_path

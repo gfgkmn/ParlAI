@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 # Download and build the data if it does not exist.
 
 import parlai.core.build_data as build_data
@@ -14,7 +14,7 @@ def create_fb_format(outpath, dtype, inpath):
     fout = open(os.path.join(outpath, dtype + '.txt'), 'w')
     with open(inpath) as f:
         lines = [line.strip('\n') for line in f]
-    lastqid = None
+    lastqid, lq, ans, cands = None, None, None, None
     for i in range(2, len(lines)):
         l = lines[i].split('\t')
         lqid = l[0]  # question id
@@ -50,23 +50,19 @@ def build(opt):
 
         # Download the data.
         fname = 'wikiqa.tar.gz'
-        url = 'https://s3.amazonaws.com/fair-data/parlai/wikiqa/' + fname
+        url = 'http://parl.ai/downloads/wikiqa/' + fname
         build_data.download(url, dpath, fname)
         build_data.untar(dpath, fname)
 
         dpext = os.path.join(dpath, 'WikiQACorpus')
-        create_fb_format(dpath, 'train',
-                         os.path.join(dpext, 'WikiQA-train.tsv'))
-        create_fb_format(dpath, 'valid',
-                         os.path.join(dpext, 'WikiQA-dev.tsv'))
-        create_fb_format(dpath, 'test',
-                         os.path.join(dpext, 'WikiQA-test.tsv'))
-        create_fb_format(dpath, 'train-filtered',
-                         os.path.join(dpext, 'WikiQA-train.tsv'))
-        create_fb_format(dpath, 'valid-filtered',
-                         os.path.join(dpext, 'WikiQA-dev.tsv'))
-        create_fb_format(dpath, 'test-filtered',
-                         os.path.join(dpext, 'WikiQA-test.tsv'))
+        create_fb_format(dpath, 'train', os.path.join(dpext, 'WikiQA-train.tsv'))
+        create_fb_format(dpath, 'valid', os.path.join(dpext, 'WikiQA-dev.tsv'))
+        create_fb_format(dpath, 'test', os.path.join(dpext, 'WikiQA-test.tsv'))
+        create_fb_format(
+            dpath, 'train-filtered', os.path.join(dpext, 'WikiQA-train.tsv')
+        )
+        create_fb_format(dpath, 'valid-filtered', os.path.join(dpext, 'WikiQA-dev.tsv'))
+        create_fb_format(dpath, 'test-filtered', os.path.join(dpext, 'WikiQA-test.tsv'))
 
         # Mark the data as built.
         build_data.mark_done(dpath, version_string=version)

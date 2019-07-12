@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from parlai.core.teachers import DialogTeacher
 from parlai.tasks.multinli.agents import setup_data
@@ -10,7 +10,6 @@ from .build import build
 
 import os
 import copy
-import json
 
 
 SNLI = 'SNLI'
@@ -32,10 +31,12 @@ def _path(opt):
     else:
         raise RuntimeError('Not valid datatype.')
 
-    data_path = os.path.join(opt['datapath'], SNLI,
-                             SNLI_PREFIX + SNLI_VERSION,
-                             SNLI_PREFIX + SNLI_VERSION +
-                             '_' + suffix + '.jsonl')
+    data_path = os.path.join(
+        opt['datapath'],
+        SNLI,
+        SNLI_PREFIX + SNLI_VERSION,
+        SNLI_PREFIX + SNLI_VERSION + '_' + suffix + '.jsonl',
+    )
 
     return data_path
 
@@ -50,3 +51,6 @@ class DefaultTeacher(DialogTeacher):
 
     def setup_data(self, path):
         return setup_data(path)
+
+    def label_candidates(self):
+        return ('entailment', 'contradiction', 'neutral')

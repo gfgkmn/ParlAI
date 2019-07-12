@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 """Simple agent which repeats back the labels sent to it.
 
 By default, replies with a single random label from the list of labels sent to
@@ -12,9 +12,11 @@ candidate is the selected label).
 
 Options:
 
-    ``returnOneRandomAnswer`` -- default ``True``, set to ``False`` to instead reply with all labels joined by commas.
+    ``returnOneRandomAnswer`` -- default ``True``, set to ``False`` to instead
+    reply with all labels joined by commas.
 
-    ``cantAnswerPercent`` -- default ``0``, set value in range[0,1] to set chance of replying with "I don't know."
+    ``cantAnswerPercent`` -- default ``0``, set value in range[0,1] to set
+    chance of replying with "I don't know."
 """
 
 import random
@@ -23,11 +25,34 @@ from parlai.core.agents import Agent
 
 
 class RepeatLabelAgent(Agent):
+    @staticmethod
+    def add_cmdline_args(argparser):
+        group = argparser.add_argument_group('RepeatLabel Arguments')
+        group.add_argument(
+            '--return_one_random_answer',
+            type='bool',
+            default=True,
+            help='return one answer from the set of labels',
+        )
+        group.add_argument(
+            '--cant_answer_percent',
+            type=float,
+            default=0,
+            help='set value in range[0,1] to set chance of '
+            'replying with special message',
+        )
+        group.add_argument(
+            '--cant_answer_message',
+            type=str,
+            default="I don't know.",
+            help='Message sent when the model cannot answer',
+        )
 
     def __init__(self, opt, shared=None):
         super().__init__(opt)
-        self.returnOneRandomAnswer = opt.get('returnOneRandomAnswer', True)
-        self.cantAnswerPercent = opt.get('cantAnswerPercent', 0)
+        self.returnOneRandomAnswer = opt.get('return_one_random_answer', True)
+        self.cantAnswerPercent = opt.get('cant_answer_percent', 0)
+        self.cantAnswerMessage = opt.get('cant_answer_message', "I don't know.")
         self.id = 'RepeatLabelAgent'
 
     def act(self):
@@ -46,8 +71,8 @@ class RepeatLabelAgent(Agent):
             else:
                 # Some 'self.cantAnswerPercent' percentage of the time
                 # the agent does not answer.
-                reply['text'] = "I don't know."
+                reply['text'] = self.cantAnswerMessage
         else:
-            reply['text'] = "I don't know."
+            reply['text'] = self.cantAnswerMessage
 
         return reply

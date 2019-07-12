@@ -1,18 +1,16 @@
+#!/usr/bin/env python3
 
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import parlai.core.build_data as build_data
 import os
 import subprocess
 import shutil
 import csv
-import stat
 import time
-import gzip
 
 
 NARRATIVE_QA_DOWNLOAD_URL = 'https://github.com/deepmind/narrativeqa/archive/master.zip'
@@ -39,15 +37,14 @@ def write_dict_list_to_csv(dict_list, filepath):
             writer.writerow(row)
 
 
-def divide_csv_into_sets(csv_filepath, sets=['train', 'valid', 'test']):
+def divide_csv_into_sets(csv_filepath, sets=('train', 'valid', 'test')):
     reader, fh = read_csv_to_dict_list(csv_filepath)
 
     base_filename = os.path.basename(csv_filepath).split('.')[0]
     base_path = os.path.dirname(csv_filepath)
 
     for s in sets:
-        path = os.path.join(base_path,
-                            base_filename + '_' + s + '.csv')
+        path = os.path.join(base_path, base_filename + '_' + s + '.csv')
         fh.seek(0)
         rows = get_rows_for_set(reader, s)
         write_dict_list_to_csv(rows, path)
@@ -55,20 +52,20 @@ def divide_csv_into_sets(csv_filepath, sets=['train', 'valid', 'test']):
     fh.close()
 
 
-def make_folders(base_path, sets=['train', 'valid', 'test']):
+def make_folders(base_path, sets=('train', 'valid', 'test')):
     for s in sets:
         path = os.path.join(base_path, s)
         if not os.path.exists(path):
             os.mkdir(path)
 
 
-def move_files(base_path, sets=['train', 'valid', 'test']):
+def move_files(base_path, sets=('train', 'valid', 'test')):
     source = os.listdir(base_path)
 
     for f in source:
         for s in sets:
             if f.endswith('_' + s + '.csv'):
-                final_name = f[:-(len('_' + s + '.csv'))] + '.csv'
+                final_name = f[: -(len('_' + s + '.csv'))] + '.csv'
                 f = os.path.join(base_path, f)
                 shutil.move(f, os.path.join(base_path, s, final_name))
 
@@ -76,8 +73,7 @@ def move_files(base_path, sets=['train', 'valid', 'test']):
 # Returns false unless the story was already downloaded and
 # has appropriate size
 def try_downloading(directory, row):
-    document_id, kind, story_url, story_size = row['document_id'], \
-        row['kind'], row['story_url'], row['story_file_size']
+    document_id, kind, story_url = row['document_id'], row['kind'], row['story_url']
     story_path = os.path.join(directory, document_id + '.content')
 
     actual_story_size = 0
@@ -89,8 +85,7 @@ def try_downloading(directory, row):
         if kind == 'gutenberg':
             time.sleep(2)
 
-        build_data.download(story_url, directory,
-                            document_id + '.content')
+        build_data.download(story_url, directory, document_id + '.content')
     else:
         return True
 
@@ -98,8 +93,7 @@ def try_downloading(directory, row):
     file_type = file_type.decode('utf-8')
 
     if 'gzip compressed' in file_type:
-        gz_path = os.path.join(directory,
-                               document_id + '.content.gz')
+        gz_path = os.path.join(directory, document_id + '.content.gz')
         shutil.move(story_path, gz_path)
         build_data.untar(gz_path)
 
@@ -114,8 +108,7 @@ def download_stories(path):
     with open(documents_csv, 'r') as f:
         reader = csv.DictReader(f, delimiter=',')
         for row in reader:
-            print("Downloading %s (%s)" % (row['wiki_title'],
-                  row['document_id']))
+            print("Downloading %s (%s)" % (row['wiki_title'], row['document_id']))
             finished = try_downloading(tmp_dir, row)
             count = 0
             while not finished and count < 5:
@@ -152,15 +145,14 @@ def build(opt):
         download_stories(base_path)
 
         # move from tmp to stories
-        tmp_stories_path = os.path.join(base_path,
-                                        'tmp')
-        new_stories_path = os.path.join(base_path,
-                                        'stories')
+        tmp_stories_path = os.path.join(base_path, 'tmp')
+        new_stories_path = os.path.join(base_path, 'stories')
         shutil.move(tmp_stories_path, new_stories_path)
 
         # divide into train, valid and test for summaries
-        summaries_csv_path = os.path.join(base_path, 'third_party',
-                                          'wikipedia', 'summaries.csv')
+        summaries_csv_path = os.path.join(
+            base_path, 'third_party', 'wikipedia', 'summaries.csv'
+        )
         new_path = os.path.join(base_path, 'summaries.csv')
         shutil.move(summaries_csv_path, new_path)
 

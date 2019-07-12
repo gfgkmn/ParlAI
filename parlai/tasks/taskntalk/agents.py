@@ -1,6 +1,9 @@
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 from parlai.core.agents import Teacher
 from .build import build
 
@@ -33,6 +36,7 @@ class TaskNTalkTeacher(Teacher):
     a random task with it. Metric updates and observation are to be
     implemented.
     """
+
     def __init__(self, opt, shared=None):
         super().__init__(opt, shared)
         self.id = 'taskntalk'
@@ -80,7 +84,7 @@ class TaskNTalkTeacher(Teacher):
             'image': ' '.join(image),
             'text': ' '.join(task),
             'labels': [' '.join(labels)],
-            'episode_done': True
+            'episode_done': True,
         }
         # TODO(kd): fetch all data for valid/test
         return action
@@ -88,6 +92,7 @@ class TaskNTalkTeacher(Teacher):
 
 class SmallTeacher(TaskNTalkTeacher):
     """Teacher for small dataset, invoked by ``taskntalk:small``."""
+
     def __init__(self, opt, shared=None):
         opt['datafile'] = _path(opt, 'small')
         super().__init__(opt, shared)
@@ -95,6 +100,7 @@ class SmallTeacher(TaskNTalkTeacher):
 
 class LargeTeacher(TaskNTalkTeacher):
     """Teacher for large dataset, invoked by ``taskntalk:large``."""
+
     def __init__(self, opt, shared=None):
         opt['datafile'] = _path(opt, 'large')
         super().__init__(opt, shared)
@@ -102,4 +108,5 @@ class LargeTeacher(TaskNTalkTeacher):
 
 class DefaultTeacher(SmallTeacher):
     """Default teacher for small dataset, invoked by ``taskntalk``."""
+
     pass

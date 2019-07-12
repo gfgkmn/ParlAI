@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from parlai.core.teachers import DialogTeacher
 from .build import build
@@ -10,7 +10,6 @@ from .build import build
 import os
 import copy
 import json
-
 
 MULTINLI = 'MultiNLI'
 MULTINLI_VERSION = '1.0'
@@ -38,11 +37,12 @@ def _path(opt):
     else:
         raise RuntimeError('Not valid datatype.')
 
-    data_path = os.path.join(opt['datapath'], MULTINLI,
-                             MULTINLI_PREFIX + MULTINLI_VERSION,
-                             MULTINLI_PREFIX + MULTINLI_VERSION +
-                             '_' + suffix + '.jsonl')
-
+    data_path = os.path.join(
+        opt['datapath'],
+        MULTINLI,
+        MULTINLI_PREFIX + MULTINLI_VERSION,
+        MULTINLI_PREFIX + MULTINLI_VERSION + '_' + suffix + '.jsonl',
+    )
     return data_path
 
 
@@ -56,7 +56,7 @@ def setup_data(path):
             hypo = MULTINLI_HYPO_PREFIX + pair[MULTINLI_HYPO_KEY]
             answer = [pair[MULTINLI_ANSWER_KEY]]
 
-            if answer == '-':
+            if answer == ['-']:
                 continue
 
             question = premise + '\n' + hypo
@@ -70,7 +70,6 @@ class DefaultTeacher(DialogTeacher):
         data_path = _path(opt)
         opt['datafile'] = data_path
         self.id = 'MultiNLI'
-
         super().__init__(opt, shared)
 
     def setup_data(self, path):

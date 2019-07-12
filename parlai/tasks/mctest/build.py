@@ -1,12 +1,13 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 # Download and build the data if it does not exist.
 
 import parlai.core.build_data as build_data
 import os
+
 
 def create_fb_format(outpath, dtype, inpath, inpath2):
     print('building fbformat:' + dtype)
@@ -33,12 +34,26 @@ def create_fb_format(outpath, dtype, inpath, inpath2):
             if ai == 'D':
                 ai = 3
             a = l[off + 1 + ai]
-            s = ('1 ' + l[2] + ' ' + l[off] + '\t' + a + '\t\t' +
-                 l[off + 1] + '|' + l[off + 2] + '|' +
-                 l[off + 3] + '|' + l[off + 4])
+            s = (
+                '1 '
+                + l[2]
+                + ' '
+                + l[off]
+                + '\t'
+                + a
+                + '\t\t'
+                + l[off + 1]
+                + '|'
+                + l[off + 2]
+                + '|'
+                + l[off + 3]
+                + '|'
+                + l[off + 4]
+            )
             off = off + 5
             fout.write(s + '\n')
     fout.close()
+
 
 def build(opt):
     dpath = os.path.join(opt['datapath'], 'MCTest')
@@ -53,25 +68,35 @@ def build(opt):
 
         # Download the data.
         fname = 'mctest.tar.gz'
-        url = 'https://s3.amazonaws.com/fair-data/parlai/mctest/' + fname
+        url = 'http://parl.ai/downloads/mctest/' + fname
         build_data.download(url, dpath, fname)
         build_data.untar(dpath, fname)
 
         dpext = os.path.join(dpath, 'mctest')
-        create_fb_format(dpath, 'train160',
-                         os.path.join(dpext, 'MCTest', 'mc160.train'), None)
-        create_fb_format(dpath, 'valid160',
-                         os.path.join(dpext, 'MCTest', 'mc160.dev'), None)
-        create_fb_format(dpath, 'test160',
-                         os.path.join(dpext, 'MCTest', 'mc160.test'),
-                         os.path.join(dpext, 'MCTestAnswers', 'mc160.test.ans'))
-        create_fb_format(dpath, 'train500',
-                         os.path.join(dpext, 'MCTest', 'mc500.train'), None)
-        create_fb_format(dpath, 'valid500',
-                         os.path.join(dpext, 'MCTest', 'mc500.dev'), None)
-        create_fb_format(dpath, 'test500',
-                         os.path.join(dpext, 'MCTest', 'mc500.test'),
-                         os.path.join(dpext, 'MCTestAnswers', 'mc500.test.ans'))
+        create_fb_format(
+            dpath, 'train160', os.path.join(dpext, 'MCTest', 'mc160.train'), None
+        )
+        create_fb_format(
+            dpath, 'valid160', os.path.join(dpext, 'MCTest', 'mc160.dev'), None
+        )
+        create_fb_format(
+            dpath,
+            'test160',
+            os.path.join(dpext, 'MCTest', 'mc160.test'),
+            os.path.join(dpext, 'MCTestAnswers', 'mc160.test.ans'),
+        )
+        create_fb_format(
+            dpath, 'train500', os.path.join(dpext, 'MCTest', 'mc500.train'), None
+        )
+        create_fb_format(
+            dpath, 'valid500', os.path.join(dpext, 'MCTest', 'mc500.dev'), None
+        )
+        create_fb_format(
+            dpath,
+            'test500',
+            os.path.join(dpext, 'MCTest', 'mc500.test'),
+            os.path.join(dpext, 'MCTestAnswers', 'mc500.test.ans'),
+        )
 
         # Mark the data as built.
         build_data.mark_done(dpath, version_string=version)

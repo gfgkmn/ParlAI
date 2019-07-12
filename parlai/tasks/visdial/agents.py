@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from parlai.core.teachers import DialogTeacher
 from .build import build, buildImage
@@ -29,8 +29,9 @@ def _path(opt):
     else:
         raise RuntimeError('Not valid datatype.')
 
-    data_path = os.path.join(opt['datapath'], 'VisDial-v0.9',
-                             'visdial_0.9_' + suffix + '.json')
+    data_path = os.path.join(
+        opt['datapath'], 'VisDial-v0.9', 'visdial_0.9_' + suffix + '.json'
+    )
 
     image_path = os.path.join(opt['datapath'], 'COCO-IMG', img_suffix)
 
@@ -51,6 +52,7 @@ class DefaultTeacher(DialogTeacher):
     inherit basic metrics, a `act` function, and enables
     Hogwild training with shared memory with no extra work.
     """
+
     def __init__(self, opt, shared=None):
 
         self.datatype = opt['datatype']
@@ -84,6 +86,15 @@ class DefaultTeacher(DialogTeacher):
                 if i == 0:
                     # prepend with caption on first question
                     # only load image on first item
-                    yield (caption + '\n' + question, answer, None, answer_options, img_path), True
+                    yield (
+                        (
+                            caption + '\n' + question,
+                            answer,
+                            None,
+                            answer_options,
+                            img_path,
+                        ),
+                        True,
+                    )
                 else:
                     yield (question, answer, None, answer_options), False

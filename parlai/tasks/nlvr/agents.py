@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from parlai.core.teachers import DialogTeacher
 from .build import build
@@ -14,7 +14,7 @@ import glob
 
 def _path(opt):
     build(opt)
-    print('opt is', opt['datatype'] )
+    print('opt is', opt['datatype'])
     dt = opt['datatype'].split(':')[0]
 
     if dt == 'valid':
@@ -33,15 +33,14 @@ class DefaultTeacher(DialogTeacher):
     # all possile answers for the questions
     cands = labels = ['true', 'false']
 
-
     def __init__(self, opt, shared=None):
         self.datatype = opt['datatype']
         data_path, self.images_path = _path(opt)
         opt['datafile'] = data_path
         self.id = 'nlvr'
         self.dt = opt['datatype'].split(':')[0]
-        if self.dt=='valid':
-            self.dt='dev'
+        if self.dt == 'valid':
+            self.dt = 'dev'
 
         super().__init__(opt, shared)
 
@@ -55,7 +54,9 @@ class DefaultTeacher(DialogTeacher):
             ques = json.loads(line)
 
             image_path = os.path.join(self.images_path, ques['directory'])
-            image_file_names = glob.glob(image_path+'/'+ self.dt+'-'+ques['identifier']+'*')
+            image_file_names = glob.glob(
+                image_path + '/' + self.dt + '-' + ques['identifier'] + '*'
+            )
 
             question = "True or False: " + ques['sentence']
             answer = [ques['label']] if self.dt != 'test' else None

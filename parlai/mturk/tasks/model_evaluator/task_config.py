@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 task_config = {}
 
@@ -29,8 +29,9 @@ task_config['hit_keywords'] = 'chat,dialog,rating'
 """A detailed task description that will be shown on the HIT task preview page
 and on the left side of the chat page. Supports HTML formatting.
 """
-task_config['task_description'] = \
-'''\'\'\'
+task_config[
+    'task_description'
+] = '''\'\'\'
 In this task, you are going to read a dialog between two people, and you will need to give a rating on how good the response is.<br><br>
 Example:<br><br>
 ------------------- Task Begin ------------------- <br><br>
@@ -43,5 +44,3 @@ True its an opinion as is my comment . I 'd say quantum of solace was meh , blan
 ------------------- Task Done ------------------- <br><br>
 If you are ready, please click "Accept HIT" to start this task.
 \'\'\''''
-
-

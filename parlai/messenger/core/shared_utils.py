@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
 import time
@@ -21,11 +21,11 @@ log_level = logging.ERROR
 
 if logging_enabled:
     logging.basicConfig(
-        filename=str(time.time())+'.log',
+        filename=str(time.time()) + '.log',
         filemode='w',
         format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
         datefmt='%H:%M:%S',
-        level=logging.DEBUG
+        level=logging.DEBUG,
     )
     logger = logging.getLogger('mturk')
 

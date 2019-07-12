@@ -1,11 +1,11 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from parlai.core.teachers import FbDialogTeacher
-from parlai.core.agents import MultiTaskTeacher
+import parlai.core.agents as core_agents
 from .build import build
 
 import copy
@@ -25,7 +25,8 @@ def _path(task, opt):
         suffix = 'valid_2000ex'
 
     return os.path.join(
-        opt['datapath'], 'CBT', 'CBTest', 'data', task + '_' + suffix + '.txt')
+        opt['datapath'], 'CBT', 'CBTest', 'data', task + '_' + suffix + '.txt'
+    )
 
 
 class NETeacher(FbDialogTeacher):
@@ -57,7 +58,7 @@ class PTeacher(FbDialogTeacher):
 
 
 # By default train on all tasks at once.
-class DefaultTeacher(MultiTaskTeacher):
+class DefaultTeacher(core_agents.MultiTaskTeacher):
     def __init__(self, opt, shared=None):
         opt = copy.deepcopy(opt)
         opt['task'] = 'cbt:NE,cbt:CN,cbt:V,cbt:P'

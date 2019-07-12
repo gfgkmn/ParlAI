@@ -1,17 +1,20 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from parlai.core.teachers import FixedDialogTeacher
 from parlai.core.image_featurizers import ImageLoader
-from examples.extract_image_feature import main as extract_main
-from .build import build, buildImage
+from parlai.scripts.extract_image_feature import extract_feats
+from .build import build
+from parlai.tasks.coco_caption.build_2014 import buildImage as buildImage_2014
+from parlai.tasks.coco_caption.build_2015 import buildImage as buildImage_2015
+
 try:
     import torch
-except Exception as e:
-    raise ModuleNotFoundError('Need to install Pytorch: go to pytorch.org')
+except ImportError:
+    raise ImportError('Need to install Pytorch: go to pytorch.org')
 from torch.utils.data import Dataset
 from parlai.agents.mlb_vqa.mlb_vqa import VqaDictionaryAgent
 
@@ -21,54 +24,62 @@ import os
 
 def _path(opt):
     build(opt)
-    buildImage(opt)
+    buildImage_2014(opt)
+    buildImage_2015(opt)
     dt = opt['datatype'].split(':')[0]
 
     if dt == 'train':
         ques_suffix = 'MultipleChoice_mscoco_train2014'
         annotation_suffix = 'mscoco_train2014'
         img_suffix = os.path.join('train2014', 'COCO_train2014_')
+        img_version = '2014'
     elif dt == 'valid':
         ques_suffix = 'MultipleChoice_mscoco_val2014'
         annotation_suffix = 'mscoco_val2014'
         img_suffix = os.path.join('val2014', 'COCO_val2014_')
+        img_version = '2014'
     elif dt == 'test':
         ques_suffix = 'MultipleChoice_mscoco_test2015'
         annotation_suffix = 'None'
         img_suffix = os.path.join('test2015', 'COCO_test2015_')
+        img_version = '2015'
     else:
         raise RuntimeError('Not valid datatype.')
 
-    data_path = os.path.join(opt['datapath'], 'VQA-v1',
-                             ques_suffix + '_questions.json')
+    data_path = os.path.join(opt['datapath'], 'VQA-v1', ques_suffix + '_questions.json')
 
-    annotation_path = os.path.join(opt['datapath'], 'VQA-v1',
-                                   annotation_suffix + '_annotations.json')
+    annotation_path = os.path.join(
+        opt['datapath'], 'VQA-v1', annotation_suffix + '_annotations.json'
+    )
 
-    image_path = os.path.join(opt['datapath'], 'COCO-IMG', img_suffix)
+    image_path = os.path.join(
+        opt['datapath'], 'COCO-IMG-{}'.format(img_version), img_suffix
+    )
 
     return data_path, annotation_path, image_path
 
 
 class VQADataset(Dataset):
     """A Pytorch Dataset utilizing streaming"""
+
     def __init__(self, opt):
         self.opt = opt
         self.use_att = opt.get('attention', False)
-        self.use_hdf5 = not opt.get('no_hdf5', False)
+        self.use_hdf5 = opt.get('use_hdf5', False)
+        self.opt['use_hdf5_extraction'] = self.use_hdf5
         self.datatype = self.opt.get('datatype')
         self.training = self.datatype.startswith('train')
         self.num_epochs = self.opt.get('num_epochs', 0)
-        _, _, self.image_path = _path(opt)
         self.image_loader = ImageLoader(opt)
         data_path, annotation_path, self.image_path = _path(opt)
         self._setup_data(data_path, annotation_path, opt.get('unittest', False))
         if self.use_hdf5:
             try:
                 import h5py
+
                 self.h5py = h5py
-            except ModuleNotFoundError:
-                raise ModuleNotFoundError('Need to install h5py - `pip install h5py`')
+            except ImportError:
+                raise ImportError('Need to install h5py - `pip install h5py`')
             self._setup_image_data()
         self.dict_agent = VqaDictionaryAgent(opt)
 
@@ -128,7 +139,7 @@ class VQADataset(Dataset):
 
     def _setup_image_data(self):
         '''hdf5 image dataset'''
-        extract_main(self.opt)
+        extract_feats(self.opt)
         im = self.opt.get('image_mode')
         if self.opt.get('attention', False):
             hdf5_path = self.image_path + 'mode_{}.hdf5'.format(im)
@@ -170,6 +181,7 @@ class OeTeacher(FixedDialogTeacher):
     VQA Open-Ended teacher, which loads the json vqa data and implements its
     own `act` method for interacting with student agent.
     """
+
     def __init__(self, opt, shared=None):
         super().__init__(opt, shared)
         data_path, annotation_path, self.image_path = _path(opt)
@@ -189,8 +201,6 @@ class OeTeacher(FixedDialogTeacher):
     def reset(self):
         super().reset()
         self.example = None
-        # call this once to get the cache moving
-        self.next_example()
 
     def num_examples(self):
         """Number of examples in VQA-v1."""
@@ -202,18 +212,16 @@ class OeTeacher(FixedDialogTeacher):
 
     def submit_load_request(self, image_id):
         img_path = self.image_path + '%012d.jpg' % (image_id)
-        self.data_loader.request_load(self.receive_data, self.image_loader.load, (img_path,))
+        self.data_loader.request_load(
+            self.receive_data, self.image_loader.load, (img_path,)
+        )
 
     def get(self, episode_idx, entry_idx=0):
         # queue up the next one
         qa = self.ques['questions'][episode_idx]
         question = qa['question']
 
-        action = {
-            'text': question,
-            'image_id': qa['image_id'],
-            'episode_done': True
-        }
+        action = {'text': question, 'image_id': qa['image_id'], 'episode_done': True}
 
         if not self.datatype.startswith('test'):
             anno = self.annotation['annotations'][episode_idx]
@@ -234,7 +242,11 @@ class OeTeacher(FixedDialogTeacher):
         if self.image_mode != 'none' and 'image_id' in self.example:
             image_id = self.example['image_id']
             self.submit_load_request(image_id)
-        return ready
+        # Try to return the previously cached example
+        if ready is None:
+            return self.next_example()
+        else:
+            return ready
 
     def share(self):
         shared = super().share()

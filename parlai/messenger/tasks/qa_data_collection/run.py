@@ -1,14 +1,12 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 from parlai.core.params import ParlaiParser
-from parlai.messenger.tasks.qa_data_collection.worlds import \
-    QADataCollectionWorld
+from parlai.messenger.tasks.qa_data_collection.worlds import QADataCollectionWorld
 from parlai.messenger.core.messenger_manager import MessengerManager
-from parlai.messenger.core.worlds import SimpleMessengerOverworld as \
-    MessengerOverworld
+from parlai.messenger.core.worlds import SimpleMessengerOverworld as MessengerOverworld
 import os
 import importlib
 
@@ -25,7 +23,7 @@ def main():
     class_name = 'DefaultTeacher'
     my_module = importlib.import_module(module_name)
     task_class = getattr(my_module, class_name)
-    task_opt = {}
+    task_opt = opt.copy()
     task_opt['datatype'] = 'train'
     task_opt['datapath'] = opt['datapath']
 
@@ -42,11 +40,7 @@ def main():
     def run_conversation(manager, opt, agents, task_id):
         task = task_class(task_opt)
         agent = agents[0]
-        world = QADataCollectionWorld(
-            opt=opt,
-            task=task,
-            agent=agent
-        )
+        world = QADataCollectionWorld(opt=opt, task=task, agent=agent)
         while not world.episode_done():
             world.parley()
         world.shutdown()
@@ -62,8 +56,7 @@ def main():
     try:
         messenger_manager.start_new_run()
         messenger_manager.start_task(
-            assign_role_functions=assign_agent_roles,
-            task_functions=task_functions,
+            assign_role_functions=assign_agent_roles, task_functions=task_functions
         )
     except BaseException:
         raise

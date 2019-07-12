@@ -1,6 +1,11 @@
-from download_models import build
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+from parlai.core.build_data import download_models
 from parlai.core.params import ParlaiParser
-from examples.eval_model import eval_model
+from parlai.scripts.eval_model import eval_model
 
 '''Evaluate pre-trained model trained for hits@1 metric
 Key-Value Memory Net model trained on personachat using persona 'self'
@@ -16,15 +21,15 @@ if __name__ == '__main__':
         model='projects.personachat.kvmemnn.kvmemnn:Kvmemnn',
         model_file='models:personachat/kvmemnn/kvmemnn/persona-self_rephraseTrn-True_rephraseTst-False_lr-0.1_esz-500_margin-0.1_tfidf-False_shareEmb-True_hops1_lins0_model',
         datatype='test',
-        numthreads=8
+        numthreads=8,
     )
     opt = parser.parse_args()
     # build all profile memory models
     fnames = ['kvmemnn.tgz']
-    opt['model_type'] = 'kvmemnn' # for builder
-    build(opt, fnames)
+    opt['model_type'] = 'kvmemnn'  # for builder
+    download_models(opt, fnames, 'personachat')
 
     # add additional model args
     opt['interactive_mode'] = False
 
-    eval_model(opt, parser)
+    eval_model(parser)

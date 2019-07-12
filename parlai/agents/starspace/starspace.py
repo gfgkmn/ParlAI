@@ -1,68 +1,28 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 #
 # Simple implementation of the starspace algorithm, slightly adapted for dialogue.
 # See: https://arxiv.org/abs/1709.03856
+# TODO: move this over to TorchRankerAgent when it is ready.
 
 from parlai.core.agents import Agent
 from parlai.core.dict import DictionaryAgent
-from parlai.core.utils import round_sigfigs, maintain_dialog_history
-from parlai.core.thread_utils import SharedTable
-
+from parlai.core.utils import maintain_dialog_history, load_cands
+from parlai.core.torch_agent import TorchAgent
 from .modules import Starspace
 
 import torch
-from torch.autograd import Variable
-import torch.autograd as autograd
 from torch import optim
 import torch.nn as nn
-import time
 from collections import deque
 
 import copy
 import os
 import random
-import math
-import pickle
-
-def load_cands(self, path):
-    """Load global fixed set of candidate labels that the teacher provides
-    every example (the true labels for a specific example are also added to
-    this set, so that it's possible to get the right answer).
-    """
-    if path is None:
-        return None
-    cands = []
-    lines_have_ids = False
-    cands_are_replies = False
-    cnt = 0
-    with open(path) as read:
-        for line in read:
-            line = line.strip().replace('\\n', '\n')
-            if len(line) > 0:
-                cnt = cnt + 1
-                # If lines are numbered we strip them of numbers.
-                if cnt == 1 and line[0:2] == '1 ':
-                    lines_have_ids = True
-                # If tabs then the label_candidates are all the replies.
-                if '\t' in line and not cands_are_replies:
-                    cands_are_replies = True
-                    cands = []
-                if lines_have_ids:
-                    space_idx = line.find(' ')
-                    line = line[space_idx + 1:]
-                    if cands_are_replies:
-                        sp = line.split('\t')
-                        if len(sp) > 1 and sp[1] != '':
-                            cands.append(sp[1])
-                    else:
-                        cands.append(line)
-                else:
-                    cands.append(line)
-    return cands
+import json
 
 
 class StarspaceAgent(Agent):
@@ -88,45 +48,130 @@ class StarspaceAgent(Agent):
     @staticmethod
     def add_cmdline_args(argparser):
         """Add command-line arguments specifically for this agent."""
-        StarspaceAgent.dictionary_class().add_cmdline_args(argparser)
         agent = argparser.add_argument_group('StarSpace Arguments')
-        agent.add_argument('-esz', '--embeddingsize', type=int, default=128,
-                           help='size of the token embeddings')
-        agent.add_argument('-enorm', '--embeddingnorm', type=float, default=10,
-                           help='max norm of word embeddings')
-        agent.add_argument('-shareEmb', '--share-embeddings', type='bool', default=True,
-                           help='whether LHS and RHS share embeddings')
-        agent.add_argument('-lr', '--learningrate', type=float, default=0.1,
-                           help='learning rate')
-        agent.add_argument('-margin', '--margin', type=float, default=0.1,
-                           help='margin')
-        agent.add_argument('-opt', '--optimizer', default='sgd',
-                           choices=StarspaceAgent.OPTIM_OPTS.keys(),
-                           help='Choose between pytorch optimizers. '
-                                'Any member of torch.optim is valid and will '
-                                'be used with default params except learning '
-                                'rate (as specified by -lr).')
-        agent.add_argument('-tr', '--truncate', type=int, default=-1,
-                           help='truncate input & output lengths to speed up '
-                           'training (may reduce accuracy). This fixes all '
-                           'input and output to have a maximum length.')
-        agent.add_argument('-k', '--neg-samples', type=int, default=10,
-                           help='number k of negative samples per example')
-        agent.add_argument('--parrot-neg', type=int, default=0,
-                           help='include query as a negative')
-        agent.add_argument('--tfidf', type='bool', default=False,
-                           help='Use frequency based normalization for embeddings.')
-        agent.add_argument('-cs', '--cache-size', type=int, default=1000,
-                           help='size of negative sample cache to draw from')
-        agent.add_argument('-hist', '--history-length', default=10000, type=int,
-                           help='Number of past tokens to remember. ')
-        agent.add_argument('-histr', '--history-replies',
-                           default='label', type=str,
-                           choices=['none', 'model', 'label'],
-                           help='Keep replies in the history, or not.')
-        agent.add_argument('-fixedCands', '--fixed-candidates-file',
-                           default=None, type=str,
-                           help='File of cands to use for prediction')
+        agent.add_argument(
+            '-emb',
+            '--embedding-type',
+            default='random',
+            choices=[
+                'random',
+                'glove',
+                'glove-fixed',
+                'glove-twitter-fixed',
+                'fasttext',
+                'fasttext-fixed',
+                'fasttext_cc',
+                'fasttext_cc-fixed',
+            ],
+            help='Choose between different strategies for initializing word '
+            'embeddings. Default is random, but can also preinitialize '
+            'from Glove or Fasttext. Preinitialized embeddings can also '
+            'be fixed so they are not updated during training.',
+        )
+        agent.add_argument(
+            '-esz',
+            '--embeddingsize',
+            type=int,
+            default=128,
+            help='size of the token embeddings',
+        )
+        agent.add_argument(
+            '-enorm',
+            '--embeddingnorm',
+            type=float,
+            default=10,
+            help='max norm of word embeddings',
+        )
+        agent.add_argument(
+            '-shareEmb',
+            '--share-embeddings',
+            type='bool',
+            default=True,
+            help='whether LHS and RHS share embeddings',
+        )
+        agent.add_argument(
+            '--lins',
+            default=0,
+            type=int,
+            help='If set to 1, add a linear layer between lhs and rhs.',
+        )
+        agent.add_argument(
+            '-lr', '--learningrate', type=float, default=0.1, help='learning rate'
+        )
+        agent.add_argument(
+            '-margin', '--margin', type=float, default=0.1, help='margin'
+        )
+        agent.add_argument(
+            '--input_dropout',
+            type=float,
+            default=0,
+            help='fraction of input/output features to dropout during training',
+        )
+        agent.add_argument(
+            '-opt',
+            '--optimizer',
+            default='sgd',
+            choices=StarspaceAgent.OPTIM_OPTS.keys(),
+            help='Choose between pytorch optimizers. '
+            'Any member of torch.optim is valid and will '
+            'be used with default params except learning '
+            'rate (as specified by -lr).',
+        )
+        agent.add_argument(
+            '-tr',
+            '--truncate',
+            type=int,
+            default=-1,
+            help='truncate input & output lengths to speed up '
+            'training (may reduce accuracy). This fixes all '
+            'input and output to have a maximum length.',
+        )
+        agent.add_argument(
+            '-k',
+            '--neg-samples',
+            type=int,
+            default=10,
+            help='number k of negative samples per example',
+        )
+        agent.add_argument(
+            '--parrot-neg', type=int, default=0, help='include query as a negative'
+        )
+        agent.add_argument(
+            '--tfidf',
+            type='bool',
+            default=False,
+            help='Use frequency based normalization for embeddings.',
+        )
+        agent.add_argument(
+            '-cs',
+            '--cache-size',
+            type=int,
+            default=1000,
+            help='size of negative sample cache to draw from',
+        )
+        agent.add_argument(
+            '-hist',
+            '--history-length',
+            default=10000,
+            type=int,
+            help='Number of past tokens to remember. ',
+        )
+        agent.add_argument(
+            '-histr',
+            '--history-replies',
+            default='label_else_model',
+            type=str,
+            choices=['none', 'model', 'label', 'label_else_model'],
+            help='Keep replies in the history, or not.',
+        )
+        agent.add_argument(
+            '-fixedCands',
+            '--fixed-candidates-file',
+            default=None,
+            type=str,
+            help='File of cands to use for prediction',
+        )
+        StarspaceAgent.dictionary_class().add_cmdline_args(argparser)
 
     def __init__(self, opt, shared=None):
         """Set up model if shared params not set, otherwise no work to do."""
@@ -142,15 +187,17 @@ class StarspaceAgent(Agent):
         self.history = {}
         self.debugMode = False
         if shared:
-            self.threadindex = shared['threadindex']
-            print("[ creating Starspace thread " + str(self.threadindex)  + " ]")
+            torch.set_num_threads(1)
             # set up shared properties
             self.dict = shared['dict']
-            self.model = shared['model'] #Starspace(opt, len(self.dict))
+            self.model = shared['model']
         else:
             print("[ creating StarspaceAgent ]")
             # this is not a shared instance of this class, so do full init
-            if opt['dict_file'] is None and opt.get('model_file'):
+            if opt.get('model_file') and (
+                os.path.isfile(opt.get('model_file') + '.dict')
+                or (opt['dict_file'] is None)
+            ):
                 # set default dict-file if not set
                 opt['dict_file'] = opt['model_file'] + '.dict'
             # load dictionary and basic tokens & vectors
@@ -159,14 +206,49 @@ class StarspaceAgent(Agent):
             self.model = Starspace(opt, len(self.dict), self.dict)
             if opt.get('model_file') and os.path.isfile(opt['model_file']):
                 self.load(opt['model_file'])
+            else:
+                self._init_embeddings()
             self.model.share_memory()
 
         # set up modules
-        self.criterion = torch.nn.CosineEmbeddingLoss(margin=opt['margin'], size_average=False)
+        self.criterion = torch.nn.CosineEmbeddingLoss(
+            margin=opt['margin'], size_average=False
+        )
         self.reset()
         self.fixedCands = False
-        if self.opt.get('fixed-candidates-file'):
-            self.fixedCands = load_cands(self.opt.get('fixed-candidates-file'))
+        self.fixedX = None
+        if self.opt.get('fixed_candidates_file'):
+            self.fixedCands_txt = load_cands(self.opt.get('fixed_candidates_file'))
+            fcs = []
+            for c in self.fixedCands_txt:
+                fcs.append(torch.LongTensor(self.parse(c)).unsqueeze(0))
+            self.fixedCands = fcs
+            print("[loaded candidates]")
+
+    def _init_embeddings(self, log=True):
+        """Copy embeddings from the pretrained embeddings to the lookuptable.
+
+        :param weight:   weights of lookup table (nn.Embedding/nn.EmbeddingBag)
+        :param emb_type: pretrained embedding type
+        """
+        weight = self.model.lt.weight
+        emb_type = self.opt.get('embedding_type', 'random')
+        if emb_type == 'random':
+            return
+        embs, name = TorchAgent._get_embtype(self, emb_type)
+        cnt = 0
+        for w, i in self.dict.tok2ind.items():
+            if w in embs.stoi:
+                vec = TorchAgent._project_vec(
+                    self, embs.vectors[embs.stoi[w]], weight.size(1)
+                )
+                weight.data[i] = vec
+                cnt += 1
+        if log:
+            print(
+                'Initialized embeddings for {} tokens ({}%) from {}.'
+                ''.format(cnt, round(cnt * 100 / len(self.dict), 1), name)
+            )
 
     def reset(self):
         """Reset observation and episode_done."""
@@ -199,23 +281,27 @@ class StarspaceAgent(Agent):
             if k not in self.opt:
                 print('Adding new option [ {k}: {v} ]'.format(k=k, v=v))
             elif self.opt[k] != v:
-                print('Overriding option [ {k}: {old} => {v}]'.format(
-                      k=k, old=self.opt[k], v=v))
+                print(
+                    'Overriding option [ {k}: {old} => {v}]'.format(
+                        k=k, old=self.opt[k], v=v
+                    )
+                )
             self.opt[k] = v
         return self.opt
 
     def parse(self, text):
         """Convert string to token indices."""
-        return self.dict.txt2vec(text)
+        vec = self.dict.txt2vec(text)
+        if vec == []:
+            vec = [self.dict[self.dict.null_token]]
+        return vec
 
     def t2v(self, text):
         p = self.dict.txt2vec(text)
-        return Variable(torch.LongTensor(p).unsqueeze(1))
+        return torch.LongTensor(p).unsqueeze(1)
 
     def v2t(self, vec):
         """Convert token indices to string of tokens."""
-        if type(vec) == Variable:
-            vec = vec.data
         new_vec = []
         for i in vec:
             new_vec.append(i)
@@ -226,17 +312,20 @@ class StarspaceAgent(Agent):
         # shallow copy observation (deep copy can be expensive)
         obs = observation.copy()
         obs['text2vec'] = maintain_dialog_history(
-            self.history, obs,
+            self.history,
+            obs,
             historyLength=self.opt['history_length'],
             useReplies=self.opt['history_replies'],
-            dict=self.dict, useStartEndIndices=False)
+            dict=self.dict,
+            useStartEndIndices=False,
+        )
         self.observation = obs
         return obs
 
     def same(self, y1, y2):
-        if len(y1.squeeze()) != len(y2.squeeze()):
+        if len(y1.squeeze(0)) != len(y2.squeeze(0)):
             return False
-        if abs((y1.squeeze()-y2.squeeze()).sum().data.sum()) > 0.00001:
+        if abs((y1.squeeze(0) - y2.squeeze(0)).sum().data.sum()) > 0.00001:
             return False
         return True
 
@@ -246,8 +335,8 @@ class StarspaceAgent(Agent):
         if cache_sz < 1:
             return negs
         k = self.opt['neg_samples']
-        for i in range(1, k * 3):
-            index =  random.randint(0, cache_sz)
+        for _i in range(1, k * 3):
+            index = random.randint(0, cache_sz)
             neg = self.ys_cache[index]
             if not self.same(ys, neg):
                 negs.append(neg)
@@ -256,7 +345,7 @@ class StarspaceAgent(Agent):
         if self.opt['parrot_neg'] > 0:
             utt = self.history['last_utterance']
             if len(utt) > 2:
-                query = Variable(torch.LongTensor(utt).unsqueeze(0))
+                query = torch.LongTensor(utt).unsqueeze(0)
                 negs.append(query)
         return negs
 
@@ -268,10 +357,16 @@ class StarspaceAgent(Agent):
             W = self.model.encoder2.lt.weight
         score = torch.Tensor(W.size(0))
         for i in range(W.size(0)):
-            score[i] = torch.nn.functional.cosine_similarity(q, W[i], dim=0).data[0]
-        val,ind=score.sort(descending=True)
+            score[i] = torch.nn.functional.cosine_similarity(q, W[i], dim=0).item()
+        val, ind = score.sort(descending=True)
         for i in range(20):
-            print(str(ind[i]) + " [" + str(val[i]) + "]: " + self.v2t(torch.Tensor([ind[i]])))
+            print(
+                str(ind[i])
+                + " ["
+                + str(val[i])
+                + "]: "
+                + self.v2t(torch.Tensor([ind[i]]))
+            )
 
     def compute_metrics(self, loss, scores):
         metrics = {}
@@ -284,6 +379,25 @@ class StarspaceAgent(Agent):
         metrics['loss'] = loss
         return metrics
 
+    def input_dropout(self, xs, ys, negs):
+        def dropout(x, rate):
+            xd = []
+            for i in x[0]:
+                if random.uniform(0, 1) > rate:
+                    xd.append(i)
+            if len(xd) == 0:
+                # pick one random thing to put in xd
+                xd.append(x[0][random.randint(0, x.size(1) - 1)])
+            return torch.LongTensor(xd).unsqueeze(0)
+
+        rate = self.opt.get('input_dropout')
+        xs2 = dropout(xs, rate)
+        ys2 = dropout(ys, rate)
+        negs2 = []
+        for n in negs:
+            negs2.append(dropout(n, rate))
+        return xs2, ys2, negs2
+
     def predict(self, xs, ys=None, cands=None, cands_txt=None, obs=None):
         """Produce a prediction from our model.
 
@@ -291,12 +405,13 @@ class StarspaceAgent(Agent):
         candidates as well if they are available and param is set.
         """
         is_training = ys is not None
-        if is_training: #
-            text_cand_inds, loss_dict = None, None
+        if is_training:
             negs = self.get_negs(xs, ys)
             if is_training and len(negs) > 0:
                 self.model.train()
                 self.optimizer.zero_grad()
+                if self.opt.get('input_dropout', 0) > 0:
+                    xs, ys, negs = self.input_dropout(xs, ys, negs)
                 xe, ye = self.model(xs, ys, negs)
                 if self.debugMode:
                     # print example
@@ -305,52 +420,63 @@ class StarspaceAgent(Agent):
                     for c in negs:
                         print("neg: " + self.v2t(c.squeeze()))
                     print("---")
-                y = Variable(-torch.ones(xe.size(0)))
-                y[0]= 1
+                y = -torch.ones(xe.size(0))
+                y[0] = 1
                 loss = self.criterion(xe, ye, y)
                 loss.backward()
                 self.optimizer.step()
-                pred = nn.CosineSimilarity().forward(xe,ye)
-                metrics = self.compute_metrics(loss.data[0], pred.data.squeeze())
-                return [{'metrics':metrics}]
+                pred = nn.CosineSimilarity().forward(xe, ye)
+                metrics = self.compute_metrics(loss.item(), pred.data.squeeze())
+                return [{'metrics': metrics}]
         else:
+            self.model.eval()
             if cands is None or cands[0] is None:
                 # cannot predict without candidates.
                 if self.fixedCands:
                     cands = [self.fixedCands]
+                    cands_txt = [self.fixedCands_txt]
                 else:
-                    return [{}]
-            # test set prediction uses candidates
-            self.model.eval()
-            xe, ye = self.model(xs, ys, cands[0])
-            pred = nn.CosineSimilarity().forward(xe,ye)
+                    return [{'text': 'I dunno.'}]
+                # test set prediction uses fixed candidates
+                if self.fixedX is None:
+                    xe, ye = self.model(xs, ys, self.fixedCands)
+                    self.fixedX = ye
+                else:
+                    # fixed candidate embed vectors are cached, dont't recompute
+                    blah = torch.LongTensor([1])
+                    xe, ye = self.model(xs, ys, [blah])
+                    ye = self.fixedX
+            else:
+                # test set prediction uses candidates
+                xe, ye = self.model(xs, ys, cands[0])
+            pred = nn.CosineSimilarity().forward(xe, ye)
             # This is somewhat costly which we could avoid if we do not evalute ranking.
             # i.e. by only doing: val,ind = pred.max(0)
-            val,ind=pred.sort(descending=True)
+            val, ind = pred.sort(descending=True)
             # predict the highest scoring candidate, and return it.
             ypred = cands_txt[0][ind.data[0]]
             tc = []
             for i in range(min(100, ind.size(0))):
                 tc.append(cands_txt[0][ind.data[i]])
-            ret = [{'text': ypred, 'text_candidates': tc }]
+            ret = [{'text': ypred, 'text_candidates': tc}]
             return ret
-        return [{}]
+        return [{'id': self.getID()}]
 
     def vectorize(self, observations):
         """Convert a list of observations into input & target tensors."""
+
         def valid(obs):
             # check if this is an example our model should actually process
             return 'text2vec' in obs and len(obs['text2vec']) > 0
+
         try:
             # valid examples and their indices
-            valid_inds, exs = zip(*[(i, ex) for i, ex in
-                                    enumerate(observations) if valid(ex)])
+            valid_inds, exs = zip(
+                *[(i, ex) for i, ex in enumerate(observations) if valid(ex)]
+            )
         except ValueError:
             # zero examples to process in this batch, so zip failed to unpack
             return None, None, None, None
-
-        # set up the input tensors
-        bsz = len(exs)
 
         # `x` text is already tokenized and truncated
         # sort by length so we can use pack_padded
@@ -366,9 +492,8 @@ class StarspaceAgent(Agent):
 
         max_x_len = max([len(x) for x in parsed_x])
         for x in parsed_x:
-            x += [[self.NULL_IDX]] * (max_x_len - len(x))
+            x += [self.NULL_IDX] * (max_x_len - len(x))
         xs = torch.LongTensor(parsed_x)
-        xs = Variable(xs)
 
         # set up the target tensors
         ys = None
@@ -384,18 +509,17 @@ class StarspaceAgent(Agent):
             for y in parsed_y:
                 y += [self.NULL_IDX] * (max_y_len - len(y))
             ys = torch.LongTensor(parsed_y)
-            ys = Variable(ys)
 
         cands = []
         cands_txt = []
         if ys is None:
             # only build candidates in eval mode.
             for o in observations:
-                if 'label_candidates' in o:
+                if o.get('label_candidates', False):
                     cs = []
                     ct = []
                     for c in o['label_candidates']:
-                        cs.append(Variable(torch.LongTensor(self.parse(c)).unsqueeze(0)))
+                        cs.append(torch.LongTensor(self.parse(c)).unsqueeze(0))
                         ct.append(c)
                     cands.append(cs)
                     cands_txt.append(ct)
@@ -416,13 +540,14 @@ class StarspaceAgent(Agent):
     def batch_act(self, observations):
         batchsize = len(observations)
         # initialize a table of replies with this agent's id
-        batch_reply = [{'id': self.getID()} for _ in range(batchsize)]
         # convert the observations into batches of inputs and targets
         # valid_inds tells us the indices of all valid examples
         # e.g. for input [{}, {'text': 'hello'}, {}, {}], valid_inds is [1]
         # since the other three elements had no 'text' field
         xs, ys, cands, cands_txt = self.vectorize(observations)
         batch_reply = self.predict(xs, ys, cands, cands_txt, observations)
+        while len(batch_reply) < batchsize:
+            batch_reply.append({'id': self.getID()})
         self.add_to_ys_cache(ys)
         return batch_reply
 
@@ -431,7 +556,7 @@ class StarspaceAgent(Agent):
         return self.batch_act([self.observation])[0]
 
     def shutdown(self):
-        #"""Save the state of the model when shutdown."""
+        # """Save the state of the model when shutdown."""
         super().shutdown()
 
     def save(self, path=None):
@@ -444,15 +569,14 @@ class StarspaceAgent(Agent):
             data['opt'] = self.opt
             with open(path, 'wb') as handle:
                 torch.save(data, handle)
-            with open(path + ".opt", 'wb') as handle:
-                pickle.dump(self.opt, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open(path + '.opt', 'w') as handle:
+                json.dump(self.opt, handle)
 
     def load(self, path):
         """Return opt and model states."""
-        with open(path, 'rb') as read:
-            print('Loading existing model params from ' + path)
-            data = torch.load(read)
-            self.model.load_state_dict(data['model'])
-            self.reset()
-            self.optimizer.load_state_dict(data['optimizer'])
-            self.opt = self.override_opt(data['opt'])
+        print('Loading existing model params from ' + path)
+        data = torch.load(path, map_location=lambda cpu, _: cpu)
+        self.model.load_state_dict(data['model'])
+        self.reset()
+        self.optimizer.load_state_dict(data['optimizer'])
+        self.opt = self.override_opt(data['opt'])

@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 #
 # ParlAI documentation build configuration file, created by
 # sphinx-quickstart on Wed Apr 19 15:46:54 2017.
@@ -36,12 +34,10 @@
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-import parlai
 import sphinx_rtd_theme
 
 
-extensions = ['sphinx.ext.autodoc',
-    'sphinx.ext.githubpages']
+extensions = ['sphinx.ext.autodoc', 'sphinx.ext.githubpages']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -57,8 +53,8 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'ParlAI'
-copyright = '2017, FAIR'
-author = 'FAIR'
+copyright = '2018, Facebook AI Research'
+author = 'Facebook AI Research'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -87,9 +83,12 @@ pygments_style = 'sphinx'
 # If true, `todo` and `todoList` produce output, else they produce nothing.
 todo_include_todos = False
 
-autodoc_member_order = 'bysource'
-
-autodoc_default_flags = ['special-members']
+autodoc_default_options = {
+    'exclude-members': '__dict__,__weakref__',
+    'special-members': '__init__',
+    'member-order': 'bysource',
+    'show-inheritance': True,
+}
 
 # -- Options for HTML output ----------------------------------------------
 
@@ -98,6 +97,7 @@ autodoc_default_flags = ['special-members']
 #
 html_theme = 'sphinx_rtd_theme'
 html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -125,15 +125,12 @@ latex_elements = {
     # The paper size ('letterpaper' or 'a4paper').
     #
     # 'papersize': 'letterpaper',
-
     # The font size ('10pt', '11pt' or '12pt').
     #
     # 'pointsize': '10pt',
-
     # Additional stuff for the LaTeX preamble.
     #
     # 'preamble': '',
-
     # Latex figure (float) alignment
     #
     # 'figure_align': 'htbp',
@@ -142,20 +139,14 @@ latex_elements = {
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
-latex_documents = [
-    (master_doc, 'ParlAI.tex', 'ParlAI Documentation',
-     'FAIR', 'manual'),
-]
+latex_documents = [(master_doc, 'ParlAI.tex', 'ParlAI Documentation', 'FAIR', 'manual')]
 
 
 # -- Options for manual page output ---------------------------------------
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [
-    (master_doc, 'parlai', 'ParlAI Documentation',
-     [author], 1)
-]
+man_pages = [(master_doc, 'parlai', 'ParlAI Documentation', [author], 1)]
 
 
 # -- Options for Texinfo output -------------------------------------------
@@ -164,7 +155,13 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'ParlAI', 'ParlAI Documentation',
-     author, 'ParlAI', 'One line description of project.',
-     'Miscellaneous'),
+    (
+        master_doc,
+        'ParlAI',
+        'ParlAI Documentation',
+        author,
+        'ParlAI',
+        'One line description of project.',
+        'Miscellaneous',
+    )
 ]

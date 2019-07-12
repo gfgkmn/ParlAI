@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from parlai.core.teachers import DialogTeacher
 from .build import build
@@ -32,10 +32,13 @@ def _path(opt):
     else:
         raise RuntimeError('Not valid datatype.')
 
-    data_path = os.path.join(opt['datapath'], COPA,
-                             COPA_RESOURCES_FOLDER_NAME,
-                             COPA_DATASETS_FOLDER_NAME,
-                             COPA_DATASET_PREFIX + suffix + '.xml')
+    data_path = os.path.join(
+        opt['datapath'],
+        COPA,
+        COPA_RESOURCES_FOLDER_NAME,
+        COPA_DATASETS_FOLDER_NAME,
+        COPA_DATASET_PREFIX + suffix + '.xml',
+    )
 
     return data_path
 

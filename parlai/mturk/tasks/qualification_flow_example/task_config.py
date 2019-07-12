@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 task_config = {}
 
@@ -30,8 +30,9 @@ task_config['hit_keywords'] = 'chat,math'
 """A detailed task description that will be shown on the HIT task preview page
 and on the left side of the chat page. Supports HTML formatting.
 """
-task_config['task_description'] = \
-'''\'\'\'
+task_config[
+    'task_description'
+] = '''\'\'\'
 In this task, you will be given a math question to answer. Please answer numerically.<br><br>
 Only take one task at a time <br><br>
 

@@ -1,6 +1,8 @@
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import os
 
@@ -24,8 +26,9 @@ def _path(task, opt):
         suffix = 'tst'
     elif dt == 'valid':
         suffix = 'dev'
-    datafile = os.path.join(prefix,
-                            '{tsk}-{type}.txt'.format(tsk=tasks[int(task)], type=suffix))
+    datafile = os.path.join(
+        prefix, '{tsk}-{type}.txt'.format(tsk=tasks[int(task)], type=suffix)
+    )
 
     cands_datafile = os.path.join(prefix, 'dialog-babi-candidates.txt')
 
@@ -36,9 +39,12 @@ def _path(task, opt):
 class KBTeacher(FbDialogTeacher):
     def __init__(self, opt, shared=None):
         build(opt)
-        opt['datafile'] = os.path.join(opt['datapath'], 'dialog-bAbI-plus',
-                                       'dialog-bAbI-plus-tasks',
-                                       'dialog-babi-kb-all.txt')
+        opt['datafile'] = os.path.join(
+            opt['datapath'],
+            'dialog-bAbI-plus',
+            'dialog-bAbI-plus-tasks',
+            'dialog-babi-kb-all.txt',
+        )
         super().__init__(opt, shared)
 
 

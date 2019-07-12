@@ -1,11 +1,11 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from parlai.core.teachers import FbDialogTeacher
-from parlai.core.agents import MultiTaskTeacher
+import parlai.core.agents as core_agents
 from .build import build
 
 import copy
@@ -19,6 +19,7 @@ tasks[4] = 'dialog-babi-task4-phone-address'
 tasks[5] = 'dialog-babi-task5-full-dialogs'
 tasks[6] = 'dialog-babi-task6-dstc2'
 
+
 def _path(task, opt):
     # Build the data if it doesn't exist.
     build(opt)
@@ -31,14 +32,14 @@ def _path(task, opt):
         suffix = 'tst'
     elif dt == 'valid':
         suffix = 'dev'
-    datafile = os.path.join(prefix,
-            '{tsk}-{type}.txt'.format(tsk=tasks[int(task)], type=suffix))
+    datafile = os.path.join(
+        prefix, '{tsk}-{type}.txt'.format(tsk=tasks[int(task)], type=suffix)
+    )
 
     if opt['task'].split(':')[2] != '6':
         cands_datafile = os.path.join(prefix, 'dialog-babi-candidates.txt')
     else:
-        cands_datafile = os.path.join(prefix,
-                'dialog-babi-task6-dstc2-candidates.txt')
+        cands_datafile = os.path.join(prefix, 'dialog-babi-task6-dstc2-candidates.txt')
 
     return datafile, cands_datafile
 
@@ -47,9 +48,12 @@ def _path(task, opt):
 class KBTeacher(FbDialogTeacher):
     def __init__(self, opt, shared=None):
         build(opt)
-        opt['datafile'] = os.path.join(opt['datapath'], 'dialog-bAbI',
-                                       'dialog-bAbI-tasks',
-                                       'dialog-babi-kb-all.txt')
+        opt['datafile'] = os.path.join(
+            opt['datapath'],
+            'dialog-bAbI',
+            'dialog-bAbI-tasks',
+            'dialog-babi-kb-all.txt',
+        )
         super().__init__(opt, shared)
 
 
@@ -62,9 +66,8 @@ class TaskTeacher(FbDialogTeacher):
 
 
 # By default train on all tasks at once.
-class DefaultTeacher(MultiTaskTeacher):
+class DefaultTeacher(core_agents.MultiTaskTeacher):
     def __init__(self, opt, shared=None):
         opt = copy.deepcopy(opt)
-        opt['task'] = ','.join('dialog_babi:Task:%d' % (i + 1)
-                               for i in range(6))
+        opt['task'] = ','.join('dialog_babi:Task:%d' % (i + 1) for i in range(6))
         super().__init__(opt, shared)

@@ -1,23 +1,24 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 try:
     from seq2seq.models.seq2seq import Seq2seq
     from seq2seq.models.EncoderRNN import EncoderRNN
     from seq2seq.models.DecoderRNN import DecoderRNN
-except ModuleNotFoundError:
-    raise ModuleNotFoundError('Please install IBM\'s seq2seq package at '
-                              'https://github.com/IBM/pytorch-seq2seq')
+except ImportError:
+    raise ImportError(
+        'Please install IBM\'s seq2seq package at '
+        'https://github.com/IBM/pytorch-seq2seq'
+    )
 
 from parlai.core.agents import Agent
 from parlai.core.dict import DictionaryAgent
 from parlai.core.utils import maintain_dialog_history, PaddingUtils, round_sigfigs
 
 import torch
-from torch.autograd import Variable
 from torch import optim
 import torch.nn as nn
 
@@ -25,7 +26,6 @@ from collections import deque
 
 import os
 import math
-import random
 
 
 class IbmSeq2seqAgent(Agent):
@@ -54,50 +54,109 @@ class IbmSeq2seqAgent(Agent):
     @staticmethod
     def add_cmdline_args(argparser):
         """Add command-line arguments specifically for this agent."""
-        IbmSeq2seqAgent.dictionary_class().add_cmdline_args(argparser)
         agent = argparser.add_argument_group('IBM Seq2Seq Arguments')
-        agent.add_argument('--init-model', type=str, default=None,
-                           help='load dict/features/weights/opts from this file')
-        agent.add_argument('-hs', '--hiddensize', type=int, default=128,
-                           help='size of the hidden layers')
-        agent.add_argument('-esz', '--embeddingsize', type=int, default=128,
-                           help='size of the token embeddings')
-        agent.add_argument('-nl', '--numlayers', type=int, default=2,
-                           help='number of hidden layers')
-        agent.add_argument('-lr', '--learningrate', type=float, default=0.005,
-                           help='learning rate')
-        agent.add_argument('-dr', '--dropout', type=float, default=0.5,
-                           help='dropout rate')
-        agent.add_argument('-clip', '--gradient-clip', type=float, default=-1,
-                           help='gradient clipping using l2 norm')
-        agent.add_argument('-bi', '--bidirectional', type='bool',
-                           default=False,
-                           help='whether to encode the context with a '
-                                'bidirectional rnn')
-        agent.add_argument('-att', '--attention', type='bool', default=True,
-                           help='Enable/disable attention over encoded state.')
-        agent.add_argument('--maxlength-in', type=int, default=50,
-                           help='Maximum input token length.')
-        agent.add_argument('--maxlength-out', type=int, default=50,
-                           help='Maximum output token length.')
-        agent.add_argument('--no-cuda', action='store_true', default=False,
-                           help='disable GPUs even if available')
-        agent.add_argument('--gpu', type=int, default=-1,
-                           help='which GPU device to use')
-        agent.add_argument('-tr', '--truncate', type=int, default=-1,
-                           help='truncate input & output lengths to speed up '
-                           'training (may reduce accuracy). This fixes all '
-                           'input and output to have a maximum length. This '
-                           'reduces the total amount '
-                           'of padding in the batches.')
-        agent.add_argument('-rnn', '--rnncell', default='gru',
-                           help='Choose between different types of RNNs.')
-        agent.add_argument('-opt', '--optimizer', default='adam',
-                           choices=IbmSeq2seqAgent.OPTIM_OPTS.keys(),
-                           help='Choose between pytorch optimizers. '
-                                'Any member of torch.optim is valid and will '
-                                'be used with default params except learning '
-                                'rate (as specified by -lr).')
+        agent.add_argument(
+            '--init-model',
+            type=str,
+            default=None,
+            help='load dict/features/weights/opts from this file',
+        )
+        agent.add_argument(
+            '-hs',
+            '--hiddensize',
+            type=int,
+            default=128,
+            help='size of the hidden layers',
+        )
+        agent.add_argument(
+            '-esz',
+            '--embeddingsize',
+            type=int,
+            default=128,
+            help='size of the token embeddings',
+        )
+        agent.add_argument(
+            '-nl', '--numlayers', type=int, default=2, help='number of hidden layers'
+        )
+        agent.add_argument(
+            '-lr', '--learningrate', type=float, default=0.005, help='learning rate'
+        )
+        agent.add_argument(
+            '-dr', '--dropout', type=float, default=0.5, help='dropout rate'
+        )
+        agent.add_argument(
+            '-clip',
+            '--gradient-clip',
+            type=float,
+            default=-1,
+            help='gradient clipping using l2 norm',
+        )
+        agent.add_argument(
+            '-bi',
+            '--bidirectional',
+            type='bool',
+            default=False,
+            help='whether to encode the context with a ' 'bidirectional rnn',
+        )
+        agent.add_argument(
+            '-att',
+            '--attention',
+            type='bool',
+            default=True,
+            help='Enable/disable attention over encoded state.',
+        )
+        agent.add_argument(
+            '--maxlength-in', type=int, default=50, help='Maximum input token length.'
+        )
+        agent.add_argument(
+            '--maxlength-out', type=int, default=50, help='Maximum output token length.'
+        )
+        agent.add_argument(
+            '--no-cuda',
+            action='store_true',
+            default=False,
+            help='disable GPUs even if available',
+        )
+        agent.add_argument(
+            '--gpu', type=int, default=-1, help='which GPU device to use'
+        )
+        agent.add_argument(
+            '-tr',
+            '--truncate',
+            type=int,
+            default=-1,
+            help='truncate input & output lengths to speed up '
+            'training (may reduce accuracy). This fixes all '
+            'input and output to have a maximum length. This '
+            'reduces the total amount '
+            'of padding in the batches.',
+        )
+        agent.add_argument(
+            '-rnn',
+            '--rnncell',
+            default='gru',
+            help='Choose between different types of RNNs.',
+        )
+        agent.add_argument(
+            '-opt',
+            '--optimizer',
+            default='adam',
+            choices=IbmSeq2seqAgent.OPTIM_OPTS.keys(),
+            help='Choose between pytorch optimizers. '
+            'Any member of torch.optim is valid and will '
+            'be used with default params except learning '
+            'rate (as specified by -lr).',
+        )
+        agent.add_argument(
+            '-histr',
+            '--history-replies',
+            default='label_else_model',
+            type=str,
+            choices=['none', 'model', 'label', 'label_else_model'],
+            help='Keep replies in the history, or not.',
+        )
+        IbmSeq2seqAgent.dictionary_class().add_cmdline_args(argparser)
+        return agent
 
     def __init__(self, opt, shared=None):
         """Set up model if shared params not set, otherwise no work to do."""
@@ -108,6 +167,7 @@ class IbmSeq2seqAgent(Agent):
         self.truncate = opt['truncate'] if opt['truncate'] > 0 else None
         self.metrics = {'loss': 0, 'num_tokens': 0}
         self.history = {}
+        self.batch_idx = shared and shared.get('batchindex') or 0
         self.states = {}
 
         # check for cuda
@@ -125,14 +185,12 @@ class IbmSeq2seqAgent(Agent):
             if 'model' in shared:
                 # model is shared during hogwild
                 self.model = shared['model']
-                self.states = shared['states']
         else:
             # this is not a shared instance of this class, so do full init
             # answers contains a batch_size list of the last answer produced
             self.answers = [None] * opt['batchsize']
 
             if self.use_cuda:
-                print('[ Using CUDA ]')
                 torch.cuda.set_device(opt['gpu'])
 
             # check first for 'init_model' for loading model from file
@@ -170,21 +228,30 @@ class IbmSeq2seqAgent(Agent):
             self.NULL_IDX = self.dict[self.dict.null_token]
 
             encoder = EncoderRNN(
-                len(self.dict), opt['maxlength_in'], opt['hiddensize'],
-                dropout_p=opt['dropout'], input_dropout_p=opt['dropout'],
-                n_layers=opt['numlayers'], rnn_cell=opt['rnncell'],
+                len(self.dict),
+                opt['maxlength_in'],
+                opt['hiddensize'],
+                dropout_p=opt['dropout'],
+                input_dropout_p=opt['dropout'],
+                n_layers=opt['numlayers'],
+                rnn_cell=opt['rnncell'],
                 bidirectional=opt['bidirectional'],
-                variable_lengths=True)
+                variable_lengths=True,
+            )
             decoder = DecoderRNN(
-                len(self.dict), opt['maxlength_out'],
+                len(self.dict),
+                opt['maxlength_out'],
                 opt['hiddensize'] * 2 if opt['bidirectional'] else opt['hiddensize'],
-                dropout_p=opt['dropout'], input_dropout_p=opt['dropout'],
-                n_layers=opt['numlayers'], rnn_cell=opt['rnncell'],
+                dropout_p=opt['dropout'],
+                input_dropout_p=opt['dropout'],
+                n_layers=opt['numlayers'],
+                rnn_cell=opt['rnncell'],
                 bidirectional=opt['bidirectional'],
-                sos_id=self.START_IDX, eos_id=self.END_IDX,
-                use_attention=opt['attention'])
+                sos_id=self.START_IDX,
+                eos_id=self.END_IDX,
+                use_attention=opt['attention'],
+            )
             self.model = Seq2seq(encoder, decoder)
-
 
             if self.states:
                 # set loaded states if applicable
@@ -193,25 +260,21 @@ class IbmSeq2seqAgent(Agent):
             if self.use_cuda:
                 self.model.cuda()
 
-        if hasattr(self, 'model'):
+        # set up criteria
+        self.criterion = nn.NLLLoss(ignore_index=self.NULL_IDX, size_average=False)
+        if self.use_cuda:
+            self.criterion.cuda()
+
+        if 'train' in opt.get('datatype', ''):
             # if model was built, do more setup
             self.clip = opt['gradient_clip']
 
             # set up tensors once
             self.START = torch.LongTensor([self.START_IDX])
-            self.xs = torch.LongTensor(1, 1)
-            self.ys = torch.LongTensor(1, 1)
-
-            # set up criteria
-            self.criterion = nn.NLLLoss(ignore_index=self.NULL_IDX,
-                                        size_average=False)
 
             if self.use_cuda:
                 # push to cuda
                 self.START = self.START.cuda()
-                self.xs = self.xs.cuda()
-                self.ys = self.ys.cuda()
-                self.criterion.cuda()
 
             # set up optimizer
             lr = opt['learningrate']
@@ -221,15 +284,19 @@ class IbmSeq2seqAgent(Agent):
                 kwargs['momentum'] = 0.95
                 kwargs['nesterov'] = True
 
-            self.optimizer = optim_class([p for p in self.model.parameters() if p.requires_grad], **kwargs)
+            self.optimizer = optim_class(
+                [p for p in self.model.parameters() if p.requires_grad], **kwargs
+            )
             if self.states:
                 if self.states['optimizer_type'] != opt['optimizer']:
-                    print('WARNING: not loading optim state since optim class '
-                          'changed.')
+                    print(
+                        'WARNING: not loading optim state since optim class ' 'changed.'
+                    )
                 else:
                     self.optimizer.load_state_dict(self.states['optimizer'])
             self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                self.optimizer, 'min', factor=0.5, patience=3, verbose=True)
+                self.optimizer, 'min', factor=0.5, patience=3, verbose=True
+            )
 
         self.reset()
 
@@ -239,8 +306,15 @@ class IbmSeq2seqAgent(Agent):
         Print out each added key and each overriden key.
         Only override args specific to the model.
         """
-        model_args = {'hiddensize', 'embeddingsize', 'numlayers', 'optimizer',
-                      'attention', 'maxlength-in', 'maxlength-out'}
+        model_args = {
+            'hiddensize',
+            'embeddingsize',
+            'numlayers',
+            'optimizer',
+            'attention',
+            'maxlength-in',
+            'maxlength-out',
+        }
         for k, v in new_opt.items():
             if k not in model_args:
                 # skip non-model args
@@ -248,8 +322,11 @@ class IbmSeq2seqAgent(Agent):
             if k not in self.opt:
                 print('Adding new option [ {k}: {v} ]'.format(k=k, v=v))
             elif self.opt[k] != v:
-                print('Overriding option [ {k}: {old} => {v}]'.format(
-                      k=k, old=self.opt[k], v=v))
+                print(
+                    'Overriding option [ {k}: {old} => {v}]'.format(
+                        k=k, old=self.opt[k], v=v
+                    )
+                )
             self.opt[k] = v
         return self.opt
 
@@ -259,8 +336,6 @@ class IbmSeq2seqAgent(Agent):
 
     def v2t(self, vec):
         """Convert token indices to string of tokens."""
-        if type(vec) == Variable:
-            vec = vec.data
         new_vec = []
         for i in vec:
             if i == self.END_IDX:
@@ -308,10 +383,9 @@ class IbmSeq2seqAgent(Agent):
         shared['START_IDX'] = self.START_IDX
         shared['END_IDX'] = self.END_IDX
         shared['NULL_IDX'] = self.NULL_IDX
+        shared['model'] = self.model
         if self.opt.get('numthreads', 1) > 1:
-            shared['model'] = self.model
             self.model.share_memory()
-            shared['states'] = self.states
         return shared
 
     def observe(self, observation):
@@ -320,19 +394,20 @@ class IbmSeq2seqAgent(Agent):
         """
         # shallow copy observation (deep copy can be expensive)
         obs = observation.copy()
-        batch_idx = self.opt.get('batchindex', 0)
         if not obs.get('preprocessed', False):
             obs['text2vec'] = maintain_dialog_history(
-                self.history, obs,
-                reply=self.answers[batch_idx],
+                self.history,
+                obs,
+                reply=self.answers[self.batch_idx],
                 historyLength=self.truncate,
-                useReplies=self.opt['include_labels'],
+                useReplies=self.opt.get('history_replies'),
                 dict=self.dict,
-                useStartEndIndices=False)
+                useStartEndIndices=False,
+            )
         else:
             obs['text2vec'] = deque(obs['text2vec'], maxlen=self.truncate)
         self.observation = obs
-        self.answers[batch_idx] = None
+        self.answers[self.batch_idx] = None
         return obs
 
     def predict(self, xs, ys=None, is_training=False):
@@ -341,11 +416,8 @@ class IbmSeq2seqAgent(Agent):
         Update the model using the targets if available, otherwise rank
         candidates as well if they are available and param is set.
         """
-        # import pdb; pdb.set_trace()
-        loss_dict = None, None
-
         x_lens = [x for x in torch.sum((xs > 0).int(), dim=1).data]
-        start = Variable(self.START, requires_grad=False)
+        start = self.START.detach()
         starts = start.expand(len(xs), 1)
 
         if is_training:
@@ -356,8 +428,8 @@ class IbmSeq2seqAgent(Agent):
             scores = torch.cat(out)
             loss = self.criterion(scores.view(-1, scores.size(-1)), ys.view(-1))
             # save loss to metrics
-            target_tokens = ys.ne(self.NULL_IDX).long().sum().data[0]
-            self.metrics['loss'] += loss.double().data[0]
+            target_tokens = ys.ne(self.NULL_IDX).long().sum().item()
+            self.metrics['loss'] += loss.double().item()
             self.metrics['num_tokens'] += target_tokens
             # average loss per token
             loss /= target_tokens
@@ -370,11 +442,13 @@ class IbmSeq2seqAgent(Agent):
             if ys is not None:
                 # calculate loss on targets
                 y_in = torch.cat([starts, ys], 1)
-                out, hid, result = self.model(xs, x_lens, y_in, teacher_forcing_ratio=False)
+                out, hid, result = self.model(
+                    xs, x_lens, y_in, teacher_forcing_ratio=False
+                )
                 scores = torch.cat(out)
                 loss = self.criterion(scores.view(-1, scores.size(-1)), ys.view(-1))
-                target_tokens = ys.ne(self.NULL_IDX).long().sum().data[0]
-                self.metrics['loss'] += loss.double().data[0]
+                target_tokens = ys.ne(self.NULL_IDX).long().sum().item()
+                self.metrics['loss'] += loss.double().item()
                 self.metrics['num_tokens'] += target_tokens
 
         predictions = torch.cat(result['sequence'], 1)
@@ -384,25 +458,24 @@ class IbmSeq2seqAgent(Agent):
         """Convert a list of observations into input & target tensors."""
         is_training = any(['labels' in obs for obs in observations])
         xs, ys, labels, valid_inds, _, _ = PaddingUtils.pad_text(
-            observations, self.dict, end_idx=None, null_idx=self.NULL_IDX,
-            dq=True, eval_labels=True, truncate=self.truncate)
+            observations,
+            self.dict,
+            end_idx=None,
+            null_idx=self.NULL_IDX,
+            dq=True,
+            eval_labels=True,
+            truncate=self.truncate,
+        )
         if xs is None:
             return None, None, None, None, None, None, None
         xs = torch.LongTensor(xs)
-        ys = torch.LongTensor(ys)
+
         if self.use_cuda:
-            # copy to gpu
-            self.xs.resize_(xs.size())
-            self.xs.copy_(xs)
-            xs = Variable(self.xs)
-            if ys is not None:
-                self.ys.resize_(ys.size())
-                self.ys.copy_(ys)
-                ys = Variable(self.ys)
-        else:
-            xs = Variable(xs)
-            if ys is not None:
-                ys = Variable(ys)
+            xs = xs.cuda()
+        if ys is not None:
+            ys = torch.LongTensor(ys)
+            if self.use_cuda:
+                ys = ys.cuda()
 
         return xs, ys, labels, valid_inds, is_training
 
@@ -429,9 +502,17 @@ class IbmSeq2seqAgent(Agent):
         else:
             report_freq = 0.01
         PaddingUtils.map_predictions(
-            predictions, valid_inds, batch_reply, observations,
-            self.dict, self.END_IDX, report_freq=report_freq, labels=labels,
-            answers=self.answers, ys=ys.data)
+            predictions,
+            valid_inds,
+            batch_reply,
+            observations,
+            self.dict,
+            self.END_IDX,
+            report_freq=report_freq,
+            labels=labels,
+            answers=self.answers,
+            ys=ys.data,
+        )
 
         return batch_reply
 
@@ -462,9 +543,7 @@ class IbmSeq2seqAgent(Agent):
 
     def load(self, path):
         """Return opt and model states."""
-        with open(path, 'rb') as read:
-            states = torch.load(read)
-
+        states = torch.load(path, map_location=lambda cpu, _: cpu)
         return states['opt'], states
 
     def receive_metrics(self, metrics_dict):

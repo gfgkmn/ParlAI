@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 import torch
 import unicodedata
 from collections import Counter
@@ -21,6 +21,8 @@ ner_list = [
 pos_dict = {i: pos_list.index(i)/len(pos_list) for i in pos_list}
 ner_dict = {i: ner_list.index(i)/len(ner_list) for i in ner_list}
 
+from parlai.core.build_data import modelzoo_path
+
 
 # ------------------------------------------------------------------------------
 # Data/model utilities.
@@ -36,18 +38,19 @@ def load_embeddings(opt, word_dict):
     """Initialize embeddings from file of pretrained vectors."""
     embeddings = torch.Tensor(len(word_dict), opt['embedding_dim'])
     embeddings.normal_(0, 1)
-
+    opt['embedding_file'] = modelzoo_path(opt.get('datapath'), opt['embedding_file'])
     # Fill in embeddings
     if not opt.get('embedding_file'):
         raise RuntimeError('Tried to load embeddings with no embedding file.')
     with open(opt['embedding_file']) as f:
         for line in f:
             parsed = line.rstrip().split(' ')
-            assert(len(parsed) == opt['embedding_dim'] + 1)
-            w = normalize_text(parsed[0])
-            if w in word_dict:
-                vec = torch.Tensor([float(i) for i in parsed[1:]])
-                embeddings[word_dict[w]].copy_(vec)
+            if len(parsed) > 2:
+                assert len(parsed) == opt['embedding_dim'] + 1
+                w = normalize_text(parsed[0])
+                if w in word_dict:
+                    vec = torch.Tensor([float(i) for i in parsed[1:]])
+                    embeddings[word_dict[w]].copy_(vec)
 
     # Zero NULL token
     embeddings[word_dict['__NULL__']].fill_(0)
@@ -144,6 +147,7 @@ def vectorize(opt, ex, word_dict, feature_dict):
 
         def _full_stop(w):
             return w in {'.', '?', '!'}
+
         for i, w in reversed(list(enumerate(ex['document']))):
             sent_idx = sent_idx + 1 if _full_stop(w) else max(sent_idx, 1)
             if sent_idx < opt['use_time']:
@@ -191,10 +195,10 @@ def batchify(batch, null=0, cuda=False):
     x1_f = torch.zeros(len(docs), max_length, features[0].size(1))
     # (samples, doc_lengths(time_steps), features)
     for i, d in enumerate(docs):
-        x1[i, :d.size(0)].copy_(d)
-        x1_mask[i, :d.size(0)].fill_(0)
-        x1_f[i, :d.size(0)].copy_(features[i])
-    # fill document matrix.
+        x1[i, : d.size(0)].copy_(d)
+        x1_mask[i, : d.size(0)].fill_(0)
+        x1_f[i, : d.size(0)].copy_(features[i])
+        # fill document matrix.
 
     # Batch questions
     max_length = max([q.size(0) for q in questions])
@@ -203,7 +207,7 @@ def batchify(batch, null=0, cuda=False):
     for i, q in enumerate(questions):
         x2[i, :q.size(0)].copy_(q)
         x2_mask[i, :q.size(0)].fill_(0)
-    # fill question matrix.
+        # fill question matrix.
 
     # Pin memory if cuda
     if cuda:
@@ -236,6 +240,7 @@ def batchify(batch, null=0, cuda=False):
 
 class AverageMeter(object):
     """Computes and stores the average and current value."""
+
     def __init__(self):
         self.reset()
 

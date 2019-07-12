@@ -1,8 +1,8 @@
+#!/usr/bin/env python3
+
 # Copyright (c) 2017-present, Moscow Institute of Physics and Technology.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from .build import build
 from parlai.core.teachers import DialogTeacher
@@ -42,13 +42,20 @@ class DefaultTeacher(DialogTeacher):
             if len(dialog) > 0 and dialog[-1]['userId'] == utterance['userId']:
                 dialog[-1]['text'] = dialog[-1]['text'] + '\n' + utterance['text']
             else:
-                dialog.append({'text': utterance['text'], 'userId': utterance['userId']})
+                dialog.append(
+                    {'text': utterance['text'], 'userId': utterance['userId']}
+                )
         return dialog
 
     @staticmethod
     def _create_learning_examples(opponent_utterances, answer_utterances):
-        examples = [u for u in map(lambda pair: ((pair[0]['text'], [pair[1]['text']]), False),
-                                   zip(opponent_utterances, answer_utterances))]
+        examples = [
+            u
+            for u in map(
+                lambda pair: ((pair[0]['text'], [pair[1]['text']]), False),
+                zip(opponent_utterances, answer_utterances),
+            )
+        ]
         return examples
 
     @staticmethod
@@ -63,13 +70,18 @@ class DefaultTeacher(DialogTeacher):
             u1_utterances = folded_dialog[::2]
             u2_utterances = folded_dialog[1::2]
 
-            for second_user_examples in [((context, ['']), True)] + \
-                    DefaultTeacher._create_learning_examples(u1_utterances, u2_utterances):
+            it = [((context, ['']), True)] + DefaultTeacher._create_learning_examples(
+                u1_utterances, u2_utterances
+            )
+            for second_user_examples in it:
                 yield second_user_examples
 
             if len(u1_utterances) > 1:
-                examples = [((context, [u1_utterances[0]['text']]), True)] + \
-                    DefaultTeacher._create_learning_examples(u2_utterances, u1_utterances[1:])
+                examples = [
+                    ((context, [u1_utterances[0]['text']]), True)
+                ] + DefaultTeacher._create_learning_examples(
+                    u2_utterances, u1_utterances[1:]
+                )
             else:
                 examples = [((context, [u1_utterances[0]['text']]), True)]
 

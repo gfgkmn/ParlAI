@@ -1,465 +1,586 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+"""Module files as torch.nn.Module subclasses for Seq2seqAgent."""
 
 import math
+
 import torch
 import torch.nn as nn
 from torch.nn.parameter import Parameter
-from torch.autograd import Variable
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 import torch.nn.functional as F
 
+from parlai.core.utils import NEAR_INF
+from parlai.core.torch_generator_agent import TorchGeneratorModel
 
-class Seq2seq(nn.Module):
+
+def _transpose_hidden_state(hidden_state):
+    """
+    Transpose the hidden state so that batch is the first dimension.
+
+    RNN modules produce (num_layers x batchsize x dim) hidden state, but
+    DataParallel expects batch size to be first. This helper is used to
+    ensure that we're always outputting batch-first, in case DataParallel
+    tries to stitch things back together.
+    """
+    if isinstance(hidden_state, tuple):
+        return tuple(map(_transpose_hidden_state, hidden_state))
+    elif torch.is_tensor(hidden_state):
+        return hidden_state.transpose(0, 1)
+    else:
+        raise ValueError("Don't know how to transpose {}".format(hidden_state))
+
+
+def opt_to_kwargs(opt):
+    """Get kwargs for seq2seq from opt."""
+    kwargs = {}
+    for k in [
+        'numlayers',
+        'dropout',
+        'bidirectional',
+        'rnn_class',
+        'lookuptable',
+        'decoder',
+        'numsoftmax',
+        'attention',
+        'attention_length',
+        'attention_time',
+        'input_dropout',
+    ]:
+        if k in opt:
+            kwargs[k] = opt[k]
+    return kwargs
+
+
+class Seq2seq(TorchGeneratorModel):
+    """Sequence to sequence parent module."""
+
     RNN_OPTS = {'rnn': nn.RNN, 'gru': nn.GRU, 'lstm': nn.LSTM}
 
-    def __init__(self, opt, num_features,
-                 padding_idx=0, start_idx=1, end_idx=2, longest_label=1):
-        super().__init__()
-        self.opt = opt
+    def __init__(
+        self,
+        num_features,
+        embeddingsize,
+        hiddensize,
+        numlayers=2,
+        dropout=0,
+        bidirectional=False,
+        rnn_class='lstm',
+        lookuptable='unique',
+        decoder='same',
+        numsoftmax=1,
+        attention='none',
+        attention_length=48,
+        attention_time='post',
+        padding_idx=0,
+        start_idx=1,
+        end_idx=2,
+        unknown_idx=3,
+        input_dropout=0,
+        longest_label=1,
+    ):
+        """Initialize seq2seq model.
 
-        self.rank = opt['rank_candidates']
-        self.attn_type = opt['attention']
+        See cmdline args in Seq2seqAgent for description of arguments.
+        """
+        super().__init__(
+            padding_idx=padding_idx,
+            start_idx=start_idx,
+            end_idx=end_idx,
+            unknown_idx=unknown_idx,
+            input_dropout=input_dropout,
+            longest_label=longest_label,
+        )
+        self.attn_type = attention
 
-        self.NULL_IDX = padding_idx
-        self.END_IDX = end_idx
-        self.register_buffer('START', torch.LongTensor([start_idx]))
-        self.longest_label = longest_label
+        rnn_class = Seq2seq.RNN_OPTS[rnn_class]
+        self.decoder = RNNDecoder(
+            num_features,
+            embeddingsize,
+            hiddensize,
+            padding_idx=padding_idx,
+            rnn_class=rnn_class,
+            numlayers=numlayers,
+            dropout=dropout,
+            attn_type=attention,
+            attn_length=attention_length,
+            attn_time=attention_time,
+            bidir_input=bidirectional,
+        )
 
-        rnn_class = Seq2seq.RNN_OPTS[opt['rnn_class']]
-        self.decoder = Decoder(
-            num_features, padding_idx=self.NULL_IDX, rnn_class=rnn_class,
-            emb_size=opt['embeddingsize'], hidden_size=opt['hiddensize'],
-            num_layers=opt['numlayers'], dropout=opt['dropout'],
-            share_output=opt['lookuptable'] in ['dec_out', 'all'],
-            attn_type=opt['attention'], attn_length=opt['attention_length'],
-            attn_time=opt.get('attention_time'),
-            bidir_input=opt['bidirectional'])
+        shared_lt = (
+            self.decoder.lt  # share embeddings between rnns
+            if lookuptable in ('enc_dec', 'all')
+            else None
+        )
+        shared_rnn = self.decoder.rnn if decoder == 'shared' else None
+        self.encoder = RNNEncoder(
+            num_features,
+            embeddingsize,
+            hiddensize,
+            padding_idx=padding_idx,
+            rnn_class=rnn_class,
+            numlayers=numlayers,
+            dropout=dropout,
+            bidirectional=bidirectional,
+            shared_lt=shared_lt,
+            shared_rnn=shared_rnn,
+            unknown_idx=unknown_idx,
+            input_dropout=input_dropout,
+        )
 
-        shared_lt = (self.decoder.lt
-                     if opt['lookuptable'] in ['enc_dec', 'all'] else None)
-        shared_rnn = self.decoder.rnn if opt['decoder'] == 'shared' else None
-        self.encoder = Encoder(
-            num_features, padding_idx=self.NULL_IDX, rnn_class=rnn_class,
-            emb_size=opt['embeddingsize'], hidden_size=opt['hiddensize'],
-            num_layers=opt['numlayers'], dropout=opt['dropout'],
-            bidirectional=opt['bidirectional'],
-            shared_lt=shared_lt, shared_rnn=shared_rnn)
+        shared_weight = (
+            self.decoder.lt  # use embeddings for projection
+            if lookuptable in ('dec_out', 'all')
+            else None
+        )
+        self.output = OutputLayer(
+            num_features,
+            embeddingsize,
+            hiddensize,
+            dropout=dropout,
+            numsoftmax=numsoftmax,
+            shared_weight=shared_weight,
+            padding_idx=padding_idx,
+        )
 
-        if self.rank:
-            self.ranker = Ranker(self.decoder, padding_idx=self.NULL_IDX,
-                                 attn_type=opt['attention'])
+    def reorder_encoder_states(self, encoder_states, indices):
+        """Reorder encoder states according to a new set of indices."""
+        enc_out, hidden, attn_mask = encoder_states
 
-    def forward(self, xs, ys=None, cands=None, valid_cands=None):
-        bsz = len(xs)
-        if ys is not None:
-            # keep track of longest label we've ever seen
-            # we'll never produce longer ones than that during prediction
-            self.longest_label = max(self.longest_label, ys.size(1))
+        # make sure we swap the hidden state around, apropos multigpu settings
+        hidden = _transpose_hidden_state(hidden)
 
-        enc_out, hidden = self.encoder(xs)
-        attn_mask = xs.ne(0).float() if self.attn_type != 'none' else None
-        start = Variable(self.START, requires_grad=False)
-        starts = start.expand(bsz, 1)
-
-        predictions = []
-        scores = []
-        text_cand_inds = None
-        if ys is not None:
-            y_in = ys.narrow(1, 0, ys.size(1) - 1)
-            xs = torch.cat([starts, y_in], 1)
-            if self.attn_type == 'none':
-                preds, score, _h = self.decoder(xs, hidden, enc_out, attn_mask)
-                predictions.append(preds)
-                scores.append(score)
-            else:
-                for i in range(ys.size(1)):
-                    xi = xs.select(1, i)
-                    preds, score, hidden = self.decoder(xi, hidden, enc_out, attn_mask)
-                    predictions.append(preds)
-                    scores.append(score)
+        # LSTM or GRU/RNN hidden state?
+        if isinstance(hidden, torch.Tensor):
+            hid, cell = hidden, None
         else:
-            # just predict
-            done = [False for _ in range(bsz)]
-            total_done = 0
-            xs = starts
+            hid, cell = hidden
 
-            for _ in range(self.longest_label):
-                # generate at most longest_label tokens
-                preds, score, hidden = self.decoder(xs, hidden, enc_out, attn_mask)
-                scores.append(score)
-                xs = preds
-                predictions.append(preds)
+        if not torch.is_tensor(indices):
+            # cast indices to a tensor if needed
+            indices = torch.LongTensor(indices).to(hid.device)
 
-                # check if we've produced the end token
-                for b in range(bsz):
-                    if not done[b]:
-                        # only add more tokens for examples that aren't done
-                        if preds.data[b][0] == self.END_IDX:
-                            # if we produced END, we're done
-                            done[b] = True
-                            total_done += 1
-                if total_done == bsz:
-                    # no need to generate any more
-                    break
-            if self.rank and cands is not None:
-                text_cand_inds = self.ranker(cands, valid_cands, start,
-                                             hidden, enc_out, attn_mask)
+        hid = hid.index_select(1, indices)
+        if cell is None:
+            hidden = hid
+        else:
+            cell = cell.index_select(1, indices)
+            hidden = (hid, cell)
 
-        if predictions:
-            predictions = torch.cat(predictions, 1)
-        if scores:
-            scores = torch.cat(scores, 1)
-        return predictions, scores, text_cand_inds
+        if self.attn_type != 'none':
+            enc_out = enc_out.index_select(0, indices)
+            attn_mask = attn_mask.index_select(0, indices)
+
+        # and bring it back to multigpu friendliness
+        hidden = _transpose_hidden_state(hidden)
+
+        return enc_out, hidden, attn_mask
+
+    def reorder_decoder_incremental_state(self, incremental_state, inds):
+        if torch.is_tensor(incremental_state):
+            # gru or vanilla rnn
+            return torch.index_select(incremental_state, 0, inds).contiguous()
+        elif isinstance(incremental_state, tuple):
+            return tuple(
+                self.reorder_decoder_incremental_state(x, inds)
+                for x in incremental_state
+            )
 
 
-class Encoder(nn.Module):
-    def __init__(self, num_features, padding_idx=0, rnn_class='lstm',
-                 emb_size=128, hidden_size=128, num_layers=2, dropout=0.1,
-                 bidirectional=False, shared_lt=None, shared_rnn=None,
-                 sparse=False):
+class UnknownDropout(nn.Module):
+    """With set frequency, replaces tokens with unknown token.
+
+    This layer can be used right before an embedding layer to make the model
+    more robust to unknown words at test time.
+    """
+
+    def __init__(self, unknown_idx, probability):
+        """Initialize layer.
+
+        :param unknown_idx: index of unknown token, replace tokens with this
+        :param probability: during training, replaces tokens with unknown token
+                            at this rate.
+        """
+        super().__init__()
+        self.unknown_idx = unknown_idx
+        self.prob = probability
+
+    def forward(self, input):
+        """If training and dropout rate > 0, masks input with unknown token."""
+        if self.training and self.prob > 0:
+            mask = input.new(input.size()).float().uniform_(0, 1) < self.prob
+            input.masked_fill_(mask, self.unknown_idx)
+        return input
+
+
+class RNNEncoder(nn.Module):
+    """RNN Encoder."""
+
+    def __init__(
+        self,
+        num_features,
+        embeddingsize,
+        hiddensize,
+        padding_idx=0,
+        rnn_class='lstm',
+        numlayers=2,
+        dropout=0.1,
+        bidirectional=False,
+        shared_lt=None,
+        shared_rnn=None,
+        input_dropout=0,
+        unknown_idx=None,
+        sparse=False,
+    ):
+        """Initialize recurrent encoder."""
         super().__init__()
 
-        self.dropout = dropout
-        self.layers = num_layers
+        self.dropout = nn.Dropout(p=dropout)
+        self.layers = numlayers
         self.dirs = 2 if bidirectional else 1
-        self.hsz = hidden_size
+        self.hsz = hiddensize
 
-        # we put zeros in here
-        self.buffers = {}
+        if input_dropout > 0 and unknown_idx is None:
+            raise RuntimeError('input_dropout > 0 but unknown_idx not set')
+        self.input_dropout = UnknownDropout(unknown_idx, input_dropout)
 
         if shared_lt is None:
-            self.lt = nn.Embedding(num_features, emb_size,
-                                   padding_idx=padding_idx,
-                                   sparse=sparse)
+            self.lt = nn.Embedding(
+                num_features, embeddingsize, padding_idx=padding_idx, sparse=sparse
+            )
         else:
             self.lt = shared_lt
 
         if shared_rnn is None:
-            self.rnn = rnn_class(emb_size, hidden_size, num_layers,
-                                 dropout=dropout, batch_first=True,
-                                 bidirectional=bidirectional)
+            self.rnn = rnn_class(
+                embeddingsize,
+                hiddensize,
+                numlayers,
+                dropout=dropout if numlayers > 1 else 0,
+                batch_first=True,
+                bidirectional=bidirectional,
+            )
         elif bidirectional:
             raise RuntimeError('Cannot share decoder with bidir encoder.')
         else:
             self.rnn = shared_rnn
 
-    def zeros(self, typeof):
-        cur_type = typeof.data.type()
-        if cur_type not in self.buffers:
-            self.buffers[cur_type] = typeof.data.new(
-                self.layers * self.dirs, 1, self.hsz).float().fill_(0)
-        return self.buffers[cur_type]
-
     def forward(self, xs):
+        """Encode sequence.
+
+        :param xs: (bsz x seqlen) LongTensor of input token indices
+
+        :returns: encoder outputs, hidden state, attention mask
+            encoder outputs are the output state at each step of the encoding.
+            the hidden state is the final hidden state of the encoder.
+            the attention mask is a mask of which input values are nonzero.
+        """
         bsz = len(xs)
 
         # embed input tokens
-        xes = F.dropout(self.lt(xs), p=self.dropout, training=self.training)
-        x_lens = [x for x in torch.sum((xs > 0).int(), dim=1).data]
-        xes_packed = pack_padded_sequence(xes, x_lens, batch_first=True)
+        xs = self.input_dropout(xs)
+        xes = self.dropout(self.lt(xs))
+        attn_mask = xs.ne(0)
+        try:
+            x_lens = torch.sum(attn_mask.int(), dim=1)
+            xes = pack_padded_sequence(xes, x_lens, batch_first=True)
+            packed = True
+        except ValueError:
+            # packing failed, don't pack then
+            packed = False
 
-        zeros = self.zeros(xs)
-        if zeros.size(1) != bsz:
-            zeros.resize_(self.layers * self.dirs, bsz, self.hsz).fill_(0)
-        h0 = Variable(zeros, requires_grad=False)
+        encoder_output, hidden = self.rnn(xes)
+        if packed:
+            # total_length to make sure we give the proper length in the case
+            # of multigpu settings.
+            # https://pytorch.org/docs/stable/notes/faq.html#pack-rnn-unpack-with-data-parallelism
+            encoder_output, _ = pad_packed_sequence(
+                encoder_output, batch_first=True, total_length=xs.size(1)
+            )
 
-        if type(self.rnn) == nn.LSTM:
-            encoder_output_packed, hidden = self.rnn(xes_packed, (h0, h0))
-            if self.dirs > 1:
-                # take elementwise max between forward and backward hidden states
-                hidden = (hidden[0].view(-1, self.dirs, bsz, self.hsz).max(1)[0],
-                          hidden[1].view(-1, self.dirs, bsz, self.hsz).max(1)[0])
-        else:
-            encoder_output_packed, hidden = self.rnn(xes_packed, h0)
+        if self.dirs > 1:
+            # project to decoder dimension by taking sum of forward and back
+            if isinstance(self.rnn, nn.LSTM):
+                hidden = (
+                    hidden[0].view(-1, self.dirs, bsz, self.hsz).sum(1),
+                    hidden[1].view(-1, self.dirs, bsz, self.hsz).sum(1),
+                )
+            else:
+                hidden = hidden.view(-1, self.dirs, bsz, self.hsz).sum(1)
 
-            if self.dirs > 1:
-                # take elementwise max between forward and backward hidden states
-                hidden = hidden.view(-1, self.dirs, bsz, self.hsz).max(1)[0]
-        encoder_output, _ = pad_packed_sequence(encoder_output_packed,
-                                                batch_first=True)
-        return encoder_output, hidden
+        return encoder_output, _transpose_hidden_state(hidden), attn_mask
 
 
-class Decoder(nn.Module):
-    def __init__(self, num_features, padding_idx=0, rnn_class='lstm',
-                 emb_size=128, hidden_size=128, num_layers=2, dropout=0.1,
-                 bidir_input=False, share_output=True,
-                 attn_type='none', attn_length=-1, attn_time='pre',
-                 sparse=False):
+class RNNDecoder(nn.Module):
+    """Recurrent decoder module.
+
+    Can be used as a standalone language model or paired with an encoder.
+    """
+
+    def __init__(
+        self,
+        num_features,
+        embeddingsize,
+        hiddensize,
+        padding_idx=0,
+        rnn_class='lstm',
+        numlayers=2,
+        dropout=0.1,
+        bidir_input=False,
+        attn_type='none',
+        attn_time='pre',
+        attn_length=-1,
+        sparse=False,
+    ):
+        """Initialize recurrent decoder."""
         super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        self.layers = numlayers
+        self.hsz = hiddensize
+        self.esz = embeddingsize
 
-        if padding_idx != 0:
-            raise RuntimeError('This module\'s output layer needs to be fixed '
-                               'if you want a padding_idx other than zero.')
-
-        self.dropout = dropout
-        self.layers = num_layers
-        self.hsz = hidden_size
-
-        self.lt = nn.Embedding(num_features, emb_size, padding_idx=padding_idx,
-                               sparse=sparse)
-        self.rnn = rnn_class(emb_size, hidden_size, num_layers,
-                             dropout=dropout, batch_first=True)
-
-        # rnn output to embedding
-        if hidden_size != emb_size:
-            self.o2e = RandomProjection(hidden_size, emb_size)
-            # other option here is to learn these weights
-            # self.o2e = nn.Linear(hidden_size, emb_size, bias=False)
-        else:
-            # no need for any transformation here
-            self.o2e = lambda x: x
-        # embedding to scores, use custom linear to possibly share weights
-        shared_weight = self.lt.weight if share_output else None
-        self.e2s = Linear(emb_size, num_features, bias=False,
-                          shared_weight=shared_weight)
-        self.shared = shared_weight is not None
+        self.lt = nn.Embedding(
+            num_features, embeddingsize, padding_idx=padding_idx, sparse=sparse
+        )
+        self.rnn = rnn_class(
+            embeddingsize,
+            hiddensize,
+            numlayers,
+            dropout=dropout if numlayers > 1 else 0,
+            batch_first=True,
+        )
 
         self.attn_type = attn_type
         self.attn_time = attn_time
-        self.attention = AttentionLayer(attn_type=attn_type,
-                                        hidden_size=hidden_size,
-                                        emb_size=emb_size,
-                                        bidirectional=bidir_input,
-                                        attn_length=attn_length,
-                                        attn_time=attn_time)
+        self.attention = AttentionLayer(
+            attn_type=attn_type,
+            hiddensize=hiddensize,
+            embeddingsize=embeddingsize,
+            bidirectional=bidir_input,
+            attn_length=attn_length,
+            attn_time=attn_time,
+        )
 
-    def forward(self, xs, hidden, encoder_output, attn_mask=None):
-        xes = F.dropout(self.lt(xs), p=self.dropout, training=self.training)
+    def forward(self, xs, encoder_output, incremental_state=None):
+        """Decode from input tokens.
+
+        :param xs: (bsz x seqlen) LongTensor of input token indices
+        :param encoder_output: output from RNNEncoder. Tuple containing
+            (enc_out, enc_hidden, attn_mask) tuple.
+        :param incremental_state: most recent hidden state to the decoder.
+            If None, the hidden state of the encoder is used as initial state,
+            and the full sequence is computed. If not None, computes only the
+            next forward in the sequence.
+
+        :returns: (output, hidden_state) pair from the RNN.
+
+            - output is a bsz x time x latentdim matrix. If incremental_state is
+                given, the time dimension will be 1. This value must be passed to
+                the model's OutputLayer for a final softmax.
+            - hidden_state depends on the choice of RNN
+        """
+        enc_state, enc_hidden, attn_mask = encoder_output
+        # in case of multi gpu, we need to transpose back out the hidden state
+        attn_params = (enc_state, attn_mask)
+
+        if incremental_state is not None:
+            # we're doing it piece by piece, so we have a more important hidden
+            # seed, and we only need to compute for the final timestep
+            hidden = _transpose_hidden_state(incremental_state)
+            # only need the last timestep then
+            xs = xs[:, -1:]
+        else:
+            # starting fresh, or generating from scratch. Use the encoder hidden
+            # state as our start state
+            hidden = _transpose_hidden_state(enc_hidden)
+
+        if isinstance(hidden, tuple):
+            hidden = tuple(x.contiguous() for x in hidden)
+        else:
+            hidden = hidden.contiguous()
+
+        # sequence indices => sequence embeddings
+        seqlen = xs.size(1)
+        xes = self.dropout(self.lt(xs))
+
         if self.attn_time == 'pre':
-            xes = self.attention(xes, hidden, encoder_output, attn_mask)
-        if xes.dim() == 2:
-            # if only one token inputted, sometimes needs unsquezing
-            xes.unsqueeze_(1)
-        output, new_hidden = self.rnn(xes, hidden)
-        if self.attn_time == 'post':
-            output = self.attention(output, new_hidden, encoder_output, attn_mask)
+            # modify input vectors with attention
+            # attention module requires we do this one step at a time
+            new_xes = []
+            for i in range(seqlen):
+                nx, _ = self.attention(xes[:, i : i + 1], hidden, attn_params)
+                new_xes.append(nx)
+            xes = torch.cat(new_xes, 1).to(xes.device)
 
-        e = self.o2e(output)
-        scores = F.dropout(self.e2s(e), p=self.dropout, training=self.training)
-        # select top scoring index, excluding the padding symbol (at idx zero)
-        _max_score, idx = scores.narrow(2, 1, scores.size(2) - 1).max(2)
-        preds = idx.add_(1)
+        if self.attn_time != 'post':
+            # no attn, we can just trust the rnn to run through
+            output, new_hidden = self.rnn(xes, hidden)
+        else:
+            # uh oh, post attn, we need run through one at a time, and do the
+            # attention modifications
+            new_hidden = hidden
+            output = []
+            for i in range(seqlen):
+                o, new_hidden = self.rnn(xes[:, i, :].unsqueeze(1), new_hidden)
+                o, _ = self.attention(o, new_hidden, attn_params)
+                output.append(o)
+            output = torch.cat(output, dim=1).to(xes.device)
 
-        return preds, scores, new_hidden
+        return output, _transpose_hidden_state(new_hidden)
 
 
-class Ranker(nn.Module):
-    def __init__(self, decoder, padding_idx=0, attn_type='none'):
+class Identity(nn.Module):
+    def forward(self, x):
+        return x
+
+
+class OutputLayer(nn.Module):
+    """Takes in final states and returns distribution over candidates."""
+
+    def __init__(
+        self,
+        num_features,
+        embeddingsize,
+        hiddensize,
+        dropout=0,
+        numsoftmax=1,
+        shared_weight=None,
+        padding_idx=-1,
+    ):
+        """Initialize output layer.
+
+        :param num_features:  number of candidates to rank
+        :param hiddensize:    (last) dimension of the input vectors
+        :param embeddingsize: (last) dimension of the candidate vectors
+        :param numsoftmax:   (default 1) number of softmaxes to calculate.
+                              see arxiv.org/abs/1711.03953 for more info.
+                              increasing this slows down computation but can
+                              add more expressivity to the embeddings.
+        :param shared_weight: (num_features x esz) vector of weights to use as
+                              the final linear layer's weight matrix. default
+                              None starts with a new linear layer.
+        :param padding_idx:   model should output a large negative number for
+                              score at this index. if set to -1 (default),
+                              this is disabled. if >= 0, subtracts one from
+                              num_features and always outputs -1e20 at this
+                              index. only used when shared_weight is not None.
+                              setting this param helps protect gradient from
+                              entering shared embedding matrices.
+        """
         super().__init__()
-        self.decoder = decoder
-        # put intermediate states in these tensors
-        self.buffers = {}
-        self.NULL_IDX = padding_idx
-        self.attn_type = attn_type
+        self.dropout = nn.Dropout(p=dropout)
 
-    def buffer(self, typeof, name, sz):
-        key = name + '_' + typeof.data.type()
-        if key not in self.buffers:
-            self.buffers[key] = typeof.data.new(sz)
-        return self.buffers[key].resize_(sz).fill_(0)
+        self.padding_idx = padding_idx
+        rng = 1.0 / math.sqrt(num_features)
+        self.bias = Parameter(torch.Tensor(num_features).uniform_(-rng, rng))
 
-    def forward(self, cands, cand_inds, start, hidden, enc_out, attn_mask):
-        cell = None
-        if type(hidden) == tuple:
-            # for lstms, split hidden state into parts
-            hidden, cell = hidden
-
-        num_hid = hidden.size(0)
-        bsz = hidden.size(1)
-        esz = hidden.size(2)
-        cands_per_ex = cands.size(1)
-        words_per_cand = cands.size(2)
-
-        # score each candidate separately
-        # cands are exs_with_cands x cands_per_ex x words_per_cand
-        # cview is total_cands x words_per_cand
-        cview = cands.view(-1, words_per_cand)
-        total_cands = cview.size(0)
-        starts = start.expand(total_cands).unsqueeze(1)
-
-        if len(cand_inds) != hidden.size(1):
-            # select hidden states which have associated cands
-            cand_indices = Variable(start.data.new([i[0] for i in cand_inds]))
-            hidden = hidden.index_select(1, cand_indices)
-
-        h_exp = (
-            # expand hidden states so each cand has an initial hidden state
-            # cands for the same input have the same initial hidden state
-            hidden.unsqueeze(2)
-            .expand(num_hid, bsz, cands_per_ex, esz)
-            .contiguous()
-            .view(num_hid, -1, esz))
-
-        if cell is None:
-            cands_hn = h_exp
-        if cell is not None:
-            if len(cand_inds) != cell.size(1):
-                # only use cell state from inputs with associated candidates
-                cell = cell.index_select(1, cand_indices)
-            c_exp = (
-                cell.unsqueeze(2)
-                .expand(num_hid, bsz, cands_per_ex, esz)
-                .contiguous()
-                .view(num_hid, -1, esz))
-            cands_hn = (h_exp, c_exp)
-
-        cand_scores = Variable(self.buffer(hidden, 'cand_scores', total_cands))
-        cand_lens = Variable(self.buffer(start, 'cand_lens', total_cands))
-
-        if self.attn_type == 'none':
-            # process entire sequence at once
-            if cview.size(1) > 1:
-                # feed in START + cands[:-2]
-                cands_in = cview.narrow(1, 0, cview.size(1) - 1)
-                starts = torch.cat([starts, cands_in], 1)
-            _preds, score, _h = self.decoder(starts, cands_hn, enc_out, attn_mask)
-
-            for i in range(cview.size(1)):
-                # calculate score at each token
-                cs = cview.select(1, i)
-                non_nulls = cs.ne(self.NULL_IDX)
-                cand_lens += non_nulls.long()
-                score_per_cand = torch.gather(score.select(1, i), 1,
-                                              cs.unsqueeze(1))
-                cand_scores += score_per_cand.squeeze() * non_nulls.float()
-        else:
-            # using attention
-            if len(cand_inds) != len(enc_out):
-                # select only encoder output matching xs we want
-                indices = Variable(start.data.new([i[0] for i in cand_inds]))
-                enc_out = enc_out.index_select(0, indices)
-                attn_mask = attn_mask.index_select(0, indices)
-
-            seq_len = enc_out.size(1)
-            cands_enc_out = (
-                enc_out.unsqueeze(1)
-                .expand(bsz, cands_per_ex, seq_len, esz)
-                .contiguous()
-                .view(-1, seq_len, esz)
+        # embedding to scores
+        if shared_weight is None:
+            # just a regular linear layer
+            self.shared = False
+            self.weight = Parameter(
+                torch.Tensor(num_features, embeddingsize).normal_(0, 1)
             )
-            cands_attn_mask = (
-                attn_mask.unsqueeze(1)
-                .expand(bsz, cands_per_ex, seq_len)
-                .contiguous()
-                .view(-1, seq_len)
-            )
-
-            cs = starts
-            for i in range(cview.size(1)):
-                # process one token at a time
-                _preds, score, _h = self.decoder(cs, cands_hn, cands_enc_out,
-                                             cands_attn_mask)
-                cs = cview.select(1, i)
-                non_nulls = cs.ne(self.NULL_IDX)
-                cand_lens += non_nulls.long()
-                score_per_cand = torch.gather(score.squeeze(), 1,
-                                              cs.unsqueeze(1))
-                cand_scores += score_per_cand.squeeze() * non_nulls.float()
-
-        # set empty scores to -1, so when divided by 0 they become -inf
-        cand_scores -= cand_lens.eq(0).float()
-        # average the scores per token
-        cand_scores /= cand_lens.float()
-
-        cand_scores = cand_scores.view(cands.size(0), cands.size(1))
-        _srtd_scores, text_cand_inds = cand_scores.sort(1, True)
-
-        return text_cand_inds
-
-
-class Linear(nn.Module):
-    """Custom Linear layer which allows for sharing weights (e.g. with an
-    nn.Embedding layer).
-    """
-    def __init__(self, in_features, out_features, bias=True,
-                 shared_weight=None):
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.shared = shared_weight is not None
-
-        # init weight
-        if not self.shared:
-            self.weight = Parameter(torch.Tensor(out_features, in_features))
         else:
-            if (shared_weight.size(0) != out_features or
-                    shared_weight.size(1) != in_features):
-                raise RuntimeError('wrong dimensions for shared weights')
-            self.weight = shared_weight
+            # use shared weights and a bias layer instead
+            self.shared = True
+            self.weight = shared_weight.weight
 
-        # init bias
-        if bias:
-            self.bias = Parameter(torch.Tensor(out_features))
+        self.numsoftmax = numsoftmax
+        if numsoftmax > 1:
+            self.esz = embeddingsize
+            self.softmax = nn.Softmax(dim=1)
+            self.prior = nn.Linear(hiddensize, numsoftmax, bias=False)
+            self.latent = nn.Linear(hiddensize, numsoftmax * embeddingsize)
+            self.activation = nn.Tanh()
         else:
-            self.register_parameter('bias', None)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        if not self.shared:
-            # weight is shared so don't overwrite it
-            self.weight.data.uniform_(-stdv, stdv)
-        if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            # rnn output to embedding
+            if hiddensize != embeddingsize:
+                # learn projection to correct dimensions
+                self.o2e = nn.Linear(hiddensize, embeddingsize, bias=True)
+            else:
+                # no need for any transformation here
+                self.o2e = Identity()
 
     def forward(self, input):
-        weight = self.weight
-        if self.shared:
-            # detach weight to prevent gradients from changing weight
-            # (but need to detach every time so weights are up to date)
-            weight = weight.detach()
-        return F.linear(input, weight, self.bias)
+        """Compute scores from inputs.
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + str(self.in_features) + ' -> ' \
-            + str(self.out_features) + ')'
+        :param input: (bsz x seq_len x num_directions * hiddensize) tensor of
+                       states, e.g. the output states of an RNN
 
+        :returns: (bsz x seqlen x num_cands) scores for each candidate
+        """
+        # next compute scores over dictionary
+        if self.numsoftmax > 1:
+            bsz = input.size(0)
+            seqlen = input.size(1) if input.dim() > 1 else 1
 
-class RandomProjection(nn.Module):
-    def __init__(self, in_features, out_features):
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.weight = Parameter(torch.Tensor(out_features, in_features),
-                                requires_grad=False)  # fix weights
-        self.reset_parameters()
+            # first compute different softmax scores based on input vec
+            # hsz => numsoftmax * esz
+            latent = self.latent(input)
+            active = self.dropout(self.activation(latent))
+            # esz => num_features
+            logit = F.linear(active.view(-1, self.esz), self.weight, self.bias)
 
-    def reset_parameters(self):
-        # experimentally: std=1 appears to affect scale too much
-        self.weight.data.normal_(std=0.1)
-        # other init option: set randomly to 1 or -1
-        # self.weight.data.bernoulli_(self.weight.fill_(0.5)).mul_(2).sub_(1)
+            # calculate priors: distribution over which softmax scores to use
+            # hsz => numsoftmax
+            prior_logit = self.prior(input).view(-1, self.numsoftmax)
+            # softmax over numsoftmax's
+            prior = self.softmax(prior_logit)
 
-    def forward(self, input):
-        return F.linear(input, self.weight)
+            # now combine priors with logits
+            prob = self.softmax(logit).view(bsz * seqlen, self.numsoftmax, -1)
+            probs = (prob * prior.unsqueeze(2)).sum(1).view(bsz, seqlen, -1)
+            scores = probs.log()
+        else:
+            # hsz => esz, good time for dropout
+            e = self.dropout(self.o2e(input))
+            # esz => num_features
+            scores = F.linear(e, self.weight, self.bias)
+
+        if self.padding_idx >= 0:
+            scores[:, :, self.padding_idx] = -NEAR_INF
+
+        return scores
 
 
 class AttentionLayer(nn.Module):
-    def __init__(self, attn_type, hidden_size, emb_size, bidirectional=False,
-                 attn_length=-1, attn_time='pre'):
+    """Computes attention between hidden and encoder states.
+
+    See arxiv.org/abs/1508.04025 for more info on each attention type.
+    """
+
+    def __init__(
+        self,
+        attn_type,
+        hiddensize,
+        embeddingsize,
+        bidirectional=False,
+        attn_length=-1,
+        attn_time='pre',
+    ):
+        """Initialize attention layer."""
         super().__init__()
         self.attention = attn_type
 
         if self.attention != 'none':
-            hsz = hidden_size
-            num_dirs = 2 if bidirectional else 1
-            hszXdirs = hsz * num_dirs
+            hsz = hiddensize
+            hszXdirs = hsz * (2 if bidirectional else 1)
             if attn_time == 'pre':
                 # attention happens on the input embeddings
-                input_dim = emb_size
+                input_dim = embeddingsize
             elif attn_time == 'post':
                 # attention happens on the output of the rnn
                 input_dim = hsz
             else:
                 raise RuntimeError('unsupported attention time')
-            self.attn_combine = nn.Linear(hszXdirs + input_dim, input_dim,
-                                          bias=False)
+
+            # linear layer for combining applied attention weights with input
+            self.attn_combine = nn.Linear(hszXdirs + input_dim, input_dim, bias=False)
 
             if self.attention == 'local':
                 # local attention over fixed set of output states
@@ -467,7 +588,7 @@ class AttentionLayer(nn.Module):
                     raise RuntimeError('Set attention length to > 0.')
                 self.max_length = attn_length
                 # combines input and previous hidden output layer
-                self.attn = nn.Linear(hsz + emb_size, attn_length, bias=False)
+                self.attn = nn.Linear(hsz + input_dim, attn_length, bias=False)
                 # combines attention weights with encoder outputs
             elif self.attention == 'concat':
                 self.attn = nn.Linear(hsz + hszXdirs, hsz, bias=False)
@@ -476,50 +597,80 @@ class AttentionLayer(nn.Module):
                 # equivalent to dot if attn is identity
                 self.attn = nn.Linear(hsz, hszXdirs, bias=False)
 
-    def forward(self, xes, hidden, enc_out, attn_mask=None):
+    def forward(self, xes, hidden, attn_params):
+        """Compute attention over attn_params given input and hidden states.
+
+        :param xes:         input state. will be combined with applied
+                            attention.
+        :param hidden:      hidden state from model. will be used to select
+                            states to attend to in from the attn_params.
+        :param attn_params: tuple of encoder output states and a mask showing
+                            which input indices are nonzero.
+
+        :returns: output, attn_weights
+                  output is a new state of same size as input state `xes`.
+                  attn_weights are the weights given to each state in the
+                  encoder outputs.
+        """
         if self.attention == 'none':
-            return xes
+            # do nothing, no attention
+            return xes, None
 
         if type(hidden) == tuple:
             # for lstms use the "hidden" state not the cell state
             hidden = hidden[0]
         last_hidden = hidden[-1]  # select hidden state from last RNN layer
 
+        enc_out, attn_mask = attn_params
+        bsz, seqlen, hszXnumdir = enc_out.size()
+        numlayersXnumdir = last_hidden.size(1)
+
         if self.attention == 'local':
-            if enc_out.size(1) > self.max_length:
-                offset = enc_out.size(1) - self.max_length
-                enc_out = enc_out.narrow(1, offset, self.max_length)
+            # local attention weights aren't based on encoder states
             h_merged = torch.cat((xes.squeeze(1), last_hidden), 1)
             attn_weights = F.softmax(self.attn(h_merged), dim=1)
-            if attn_weights.size(1) > enc_out.size(1):
-                attn_weights = attn_weights.narrow(1, 0, enc_out.size(1))
+
+            # adjust state sizes to the fixed window size
+            if seqlen > self.max_length:
+                offset = seqlen - self.max_length
+                enc_out = enc_out.narrow(1, offset, self.max_length)
+                seqlen = self.max_length
+            if attn_weights.size(1) > seqlen:
+                attn_weights = attn_weights.narrow(1, 0, seqlen)
         else:
             hid = last_hidden.unsqueeze(1)
             if self.attention == 'concat':
-                hid = hid.expand(last_hidden.size(0),
-                                 enc_out.size(1),
-                                 last_hidden.size(1))
+                # concat hidden state and encoder outputs
+                hid = hid.expand(bsz, seqlen, numlayersXnumdir)
                 h_merged = torch.cat((enc_out, hid), 2)
+                # then do linear combination of them with activation
                 active = F.tanh(self.attn(h_merged))
                 attn_w_premask = self.attn_v(active).squeeze(2)
             elif self.attention == 'dot':
-                if hid.size(2) != enc_out.size(2):
+                # dot product between hidden and encoder outputs
+                if numlayersXnumdir != hszXnumdir:
                     # enc_out has two directions, so double hid
                     hid = torch.cat([hid, hid], 2)
-                attn_w_premask = (
-                    torch.bmm(hid, enc_out.transpose(1, 2)).squeeze(1))
+                enc_t = enc_out.transpose(1, 2)
+                attn_w_premask = torch.bmm(hid, enc_t).squeeze(1)
             elif self.attention == 'general':
+                # before doing dot product, transform hidden state with linear
+                # same as dot if linear is identity
                 hid = self.attn(hid)
-                attn_w_premask = (
-                    torch.bmm(hid, enc_out.transpose(1, 2)).squeeze(1))
-            # calculate activation scores
+                enc_t = enc_out.transpose(1, 2)
+                attn_w_premask = torch.bmm(hid, enc_t).squeeze(1)
+
+            # calculate activation scores, apply mask if needed
             if attn_mask is not None:
                 # remove activation from NULL symbols
-                attn_w_premask -= (1 - attn_mask) * 1e20
+                attn_w_premask.masked_fill_((1 - attn_mask), -NEAR_INF)
             attn_weights = F.softmax(attn_w_premask, dim=1)
 
+        # apply the attention weights to the encoder states
         attn_applied = torch.bmm(attn_weights.unsqueeze(1), enc_out)
+        # concatenate the input and encoder states
         merged = torch.cat((xes.squeeze(1), attn_applied.squeeze(1)), 1)
-        output = F.tanh(self.attn_combine(merged).unsqueeze(1))
+        # combine them with a linear layer and tanh activation
+        output = torch.tanh(self.attn_combine(merged).unsqueeze(1))
 
-        return output
+        return output, attn_weights

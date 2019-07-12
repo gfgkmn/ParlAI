@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 from parlai.core.worlds import World, validate
 
 
@@ -36,8 +36,7 @@ class QADataCollectionWorld(World):
             context = '\n'.join(qa['text'].split('\n')[:-1])
 
             # Wrap the context with a prompt telling the person what to do next
-            ad['text'] = (context +
-                          '\n\nPlease provide a question given this context.')
+            ad['text'] = context + '\n\nPlease provide a question given this context.'
 
             self.agent.observe(validate(ad))
             self.question = self.agent.act()

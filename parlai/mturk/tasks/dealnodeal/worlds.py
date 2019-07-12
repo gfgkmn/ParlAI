@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 from parlai.mturk.core.worlds import MTurkTaskWorld
 from parlai.core.worlds import validate
 from joblib import Parallel, delayed
@@ -16,6 +16,7 @@ import random
 class MTurkDealNoDealDialogWorld(MTurkTaskWorld):
     """World where two agents have a dialogue to negotiate a deal.
     """
+
     def __init__(self, opt, agents=None, shared=None):
         # Add passed in agents directly.
         if agents is not None:
@@ -36,23 +37,35 @@ class MTurkDealNoDealDialogWorld(MTurkTaskWorld):
         """
         if self.first_turn:
             # Use NegotiationTeacher to load data for us
-            data = self.task.episodes[
-                self.num_negotiations % len(self.task.episodes)
-            ].strip().split()
+            data = (
+                self.task.episodes[self.num_negotiations % len(self.task.episodes)]
+                .strip()
+                .split()
+            )
             self.num_negotiations += 1
 
             for agent, tag in zip(self.agents, ['input', 'partner_input']):
-                (book_cnt, book_val, hat_cnt,
-                 hat_val, ball_cnt, ball_val) = get_tag(data, tag)
+                (book_cnt, book_val, hat_cnt, hat_val, ball_cnt, ball_val) = get_tag(
+                    data, tag
+                )
                 action = {}
                 action['text'] = WELCOME_MESSAGE.format(
-                    book_cnt=book_cnt, book_val=book_val,
-                    hat_cnt=hat_cnt, hat_val=hat_val,
-                    ball_cnt=ball_cnt, ball_val=ball_val)
+                    book_cnt=book_cnt,
+                    book_val=book_val,
+                    hat_cnt=hat_cnt,
+                    hat_val=hat_val,
+                    ball_cnt=ball_cnt,
+                    ball_val=ball_val,
+                )
 
-                action['items'] = {"book_cnt": book_cnt, "book_val": book_val,
-                                   "hat_cnt": hat_cnt, "hat_val": hat_val,
-                                   "ball_cnt": ball_cnt, "ball_val": ball_val}
+                action['items'] = {
+                    "book_cnt": book_cnt,
+                    "book_val": book_val,
+                    "hat_cnt": hat_cnt,
+                    "hat_val": hat_val,
+                    "ball_cnt": ball_cnt,
+                    "ball_val": ball_val,
+                }
 
                 agent.observe(validate(action))
             self.first_turn = False
@@ -81,9 +94,9 @@ class MTurkDealNoDealDialogWorld(MTurkTaskWorld):
                         self.first_turn = True
                         self.episodeDone = True
                 elif act['episode_done']:
-                    # Action is not selection but episode ended due to disconnection or timeout or returned hit
+                    # Action is not selection but episode ended due to
+                    # disconnection or timeout or returned hit
                     self.episodeDone = True
-
 
     def episode_done(self):
         return self.episodeDone
@@ -100,7 +113,7 @@ class MTurkDealNoDealDialogWorld(MTurkTaskWorld):
                 agent.shutdown(timeout=None)
             except Exception:
                 agent.shutdown()  # not MTurkAgent
-        Parallel(
-            n_jobs=len(self.agents),
-            backend='threading'
-        )(delayed(shutdown_agent)(agent) for agent in self.agents)
+
+        Parallel(n_jobs=len(self.agents), backend='threading')(
+            delayed(shutdown_agent)(agent) for agent in self.agents
+        )

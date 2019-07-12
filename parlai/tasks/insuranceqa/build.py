@@ -1,8 +1,8 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 # Download and build the data if it does not exist.
 
 import gzip
@@ -39,7 +39,10 @@ class ParseInsuranceQA(object):
             for line in f:
                 fields = line.rstrip('\n').split("\t")
                 if len(fields) != 2:
-                    raise ValueError("vocab file (%s) corrupted. Line (%s)" % (repr(line), vocab_path))
+                    raise ValueError(
+                        "vocab file (%s) corrupted. Line (%s)"
+                        % (repr(line), vocab_path)
+                    )
                 else:
                     wid, word = fields
                     d_vocab[wid] = word
@@ -53,7 +56,10 @@ class ParseInsuranceQA(object):
         for line in lines:
             fields = line.rstrip("\n").split("\t")
             if len(fields) != 2:
-                raise ValueError("label2answer file (%s) corrupted. Line (%s)" % (repr(line), label2answer_path_gz))
+                raise ValueError(
+                    "label2answer file (%s) corrupted. Line (%s)"
+                    % (repr(line), label2answer_path_gz)
+                )
             else:
                 aid, s_wids = fields
                 sent = cls.wids2sent(s_wids.split(), d_vocab)
@@ -132,7 +138,14 @@ class ParseInsuranceQAV1(ParseInsuranceQA):
                 good_ans = [d_label_answer[aid_] for aid_ in s_good_aids.split()]
                 bad_ans = [d_label_answer[aid_] for aid_ in s_bad_aids.split()]
                 # save good answers and candidates
-                s = '1 ' + q + '\t' + "|".join(good_ans) + '\t\t' + "|".join(good_ans + bad_ans)
+                s = (
+                    '1 '
+                    + q
+                    + '\t'
+                    + "|".join(good_ans)
+                    + '\t\t'
+                    + "|".join(good_ans + bad_ans)
+                )
                 fout.write(s + '\n')
         fout.close()
 
@@ -144,16 +157,27 @@ class ParseInsuranceQAV2(ParseInsuranceQA):
     @classmethod
     def write_data_files(cls, dpext, out_path, d_vocab, d_label_answer):
         data_fnames_tmpl = [
-            ("train.%s", "InsuranceQA.question.anslabel.token.%s.pool.solr.train.encoded.gz"),
-            ("valid.%s", "InsuranceQA.question.anslabel.token.%s.pool.solr.valid.encoded.gz"),
-            ("test.%s", "InsuranceQA.question.anslabel.token.%s.pool.solr.test.encoded.gz")
+            (
+                "train.%s",
+                "InsuranceQA.question.anslabel.token.%s.pool.solr.train.encoded.gz",
+            ),  # noqa: E501
+            (
+                "valid.%s",
+                "InsuranceQA.question.anslabel.token.%s.pool.solr.valid.encoded.gz",
+            ),  # noqa: E501
+            (
+                "test.%s",
+                "InsuranceQA.question.anslabel.token.%s.pool.solr.test.encoded.gz",
+            ),  # noqa: E501
         ]
         for n_cands in [100, 500, 1000, 1500]:
             for dtype_tmp, data_fname_tmp in data_fnames_tmpl:
                 dtype = dtype_tmp % n_cands
                 data_fname = data_fname_tmp % n_cands
                 data_path = os.path.join(dpext, data_fname)
-                cls.create_fb_format(out_path, dtype, data_path, d_vocab, d_label_answer)
+                cls.create_fb_format(
+                    out_path, dtype, data_path, d_vocab, d_label_answer
+                )
 
     @classmethod
     def create_fb_format(cls, out_path, dtype, inpath, d_vocab, d_label_answer):
@@ -164,14 +188,23 @@ class ParseInsuranceQAV2(ParseInsuranceQA):
         for line in lines:
             fields = line.rstrip("\n").split("\t")
             if len(fields) != 4:
-                raise ValueError("data file (%s) corrupted. Line (%s)" % (repr(line), inpath))
+                raise ValueError(
+                    "data file (%s) corrupted. Line (%s)" % (repr(line), inpath)
+                )
             else:
                 _, s_q_wids, s_good_aids, s_bad_aids = fields
                 q = cls.wids2sent(s_q_wids.split(), d_vocab)
                 good_ans = [d_label_answer[aid_] for aid_ in s_good_aids.split()]
                 bad_ans = [d_label_answer[aid_] for aid_ in s_bad_aids.split()]
                 # save
-                s = '1 ' + q + '\t' + "|".join(good_ans) + '\t\t' + "|".join(good_ans + bad_ans)
+                s = (
+                    '1 '
+                    + q
+                    + '\t'
+                    + "|".join(good_ans)
+                    + '\t\t'
+                    + "|".join(good_ans + bad_ans)
+                )
                 fout.write(s + '\n')
         fout.close()
 

@@ -1,11 +1,12 @@
-# Copyright (c) 2017-present, Facebook, Inc.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import parlai.core.build_data as build_data
 import os
+
 
 def build(opt):
     dpath = os.path.join(opt['datapath'], 'nlvr')
@@ -22,8 +23,7 @@ def build(opt):
 
         # Download the data from github
         fname = 'nlvr.zip'
-        url = ('https://github.com/clic-lab/nlvr/'
-               'archive/master.zip')
+        url = 'https://github.com/clic-lab/nlvr/' 'archive/master.zip'
         print('[downloading data from: ' + url + ']')
         build_data.download(url, dpath, fname)
         build_data.untar(dpath, fname)

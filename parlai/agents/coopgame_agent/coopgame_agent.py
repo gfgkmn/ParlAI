@@ -1,6 +1,9 @@
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+#!/usr/bin/env python3
+
+# Copyright (c) Facebook, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 from parlai.core.agents import Agent
 from parlai.core.dict import DictionaryAgent
 from .modules import ImgNet, ListenNet, StateNet, SpeakNet, PredictNet
@@ -41,19 +44,32 @@ class CooperativeGameAgent(Agent):
     @staticmethod
     def add_cmdline_args(argparser):
         """Add command-line arguments specifically for this agent."""
-        DictionaryAgent.add_cmdline_args(argparser)
         group = argparser.add_argument_group('Cooperative Game Agent Arguments')
-        agent.add_argument('--optimizer', default='adam',
-                           choices=CooperativeGameAgent.OPTIM_OPTS.keys(),
-                           help='Choose between pytorch optimizers. Any member of torch.optim '
-                                'is valid and will be used with default params except learning '
-                                'rate (as specified by -lr).')
-        group.add_argument('--learning-rate', default=1e-2, type=float,
-                           help='Initial learning rate')
-        group.add_argument('--no-cuda', action='store_true', default=False,
-                           help='disable GPUs even if available')
-        group.add_argument('--gpuid', type=int, default=-1,
-                           help='which GPU device to use (defaults to cpu)')
+        group.add_argument(
+            '--optimizer',
+            default='adam',
+            choices=CooperativeGameAgent.OPTIM_OPTS.keys(),
+            help='Choose between pytorch optimizers. Any member of '
+            'torch.optim is valid and will be used with '
+            'default params except learning rate (as specified '
+            'by -lr).',
+        )
+        group.add_argument(
+            '--learning-rate', default=1e-2, type=float, help='Initial learning rate'
+        )
+        group.add_argument(
+            '--no-cuda',
+            action='store_true',
+            default=False,
+            help='disable GPUs even if available',
+        )
+        group.add_argument(
+            '--gpuid',
+            type=int,
+            default=-1,
+            help='which GPU device to use (defaults to cpu)',
+        )
+        DictionaryAgent.add_cmdline_args(argparser)
 
     def __init__(self, opt, shared=None):
         super().__init__(opt, shared)
@@ -72,7 +88,7 @@ class CooperativeGameAgent(Agent):
         # setup optimizer according to command-line arguments
         self.optimizer = self.setup_optimizer()
         # setup dictionary agent
-        self.dict_agent = dictionary_class()()
+        self.dict_agent = CooperativeGameAgent.dictionary_class()()
 
         # transfer agent to GPU if applicable
         self.use_cuda = not opt.get('no_cuda') and torch.cuda.is_available()
@@ -95,13 +111,12 @@ class CooperativeGameAgent(Agent):
         argument ``--optimizer``. Override this method to setup optimizer with
         non-default parameters or use custom optimizer not available as choice.
         """
-        optim_class = CooperativeGameAgent.OPTIM_OPTS[opt['optimizer']]
+        optim_class = CooperativeGameAgent.OPTIM_OPTS[self.opt['optimizer']]
         kwargs = {'lr': self.opt['learning_rate']}
-        if opt['optimizer'] == 'sgd':
+        if self.opt['optimizer'] == 'sgd':
             kwargs['momentum'] = 0.95
             kwargs['nesterov'] = True
-        return optim_class([module.parameters() for module in self.modules],
-                            **kwargs)
+        return optim_class([module.parameters() for module in self.modules], **kwargs)
 
     def tokenize(self, text):
         """Convert text observaton (string) to a ``torch.autograd.Variable`` of
@@ -116,7 +131,7 @@ class CooperativeGameAgent(Agent):
     def detokenize(self, vec):
         """Convert a ``torch.autograd.Variable`` of tokens into a string."""
         text_tokens = vec
-        if type(text_tokens) == Variable:
+        if isinstance(text_tokens, Variable):
             text_tokens = list(text_tokens.data)
         return self.dict.vec2txt(text_tokens)
 
@@ -134,22 +149,24 @@ class CooperativeGameAgent(Agent):
             if 'image' in observation:
                 token_embeds = torch.cat((token_embeds, observation['image']), 1)
                 token_embeds = token_embeds.squeeze(1)
-            self.h_state, self.c_state = self.state_net(token_embeds,
-                                                        (self.h_state, self.c_state))
+            self.h_state, self.c_state = self.state_net(
+                token_embeds, (self.h_state, self.c_state)
+            )
         else:
             if observation.get('reward', None):
                 for action in self.actions:
                     action.reinforce(observation['reward'])
-                autograd_backward(self.actions, [None for _ in self.actions],
-                                  retain_graph=True)
+                autograd_backward(
+                    self.actions, [None for _ in self.actions], retain_graph=True
+                )
                 # clamp all gradients between (-5, 5)
                 for module in self.modules:
                     for parameter in module.parameters():
                         parameter.grad.data.clamp_(min=-5, max=5)
-                optimizer.step()
+                self.optimizer.step()
             else:
                 # start of dialog episode
-                optimizer.zero_grad()
+                self.optimizer.zero_grad()
                 self.reset()
 
     def act(self):
@@ -188,18 +205,39 @@ class QuestionerAgent(CooperativeGameAgent):
         values at according to (Kottur et al. 2017)."""
         DictionaryAgent.add_cmdline_args(argparser)
         group = argparser.add_argument_group('Questioner Agent Arguments')
-        argparser.add_argument('--q-in-vocab', default=13, type=int,
-                               help='Input vocabulary for questioner. Usually includes total '
-                                    'distinct words spoken by answerer, questioner itself, '
-                                    'and words by which the goal is described.')
-        argparser.add_argument('--q-embed-size', default=20, type=int,
-                               help='Size of word embeddings for questioner')
-        argparser.add_argument('--q-state-size', default=100, type=int,
-                               help='Size of hidden state of questioner')
-        argparser.add_argument('--q-out-vocab', default=3, type=int,
-                               help='Output vocabulary for questioner')
-        argparser.add_argument('--q-num-pred', default=12, type=int,
-                               help='Size of output to be predicted (for goal).')
+        group.add_argument(
+            '--q-in-vocab',
+            default=13,
+            type=int,
+            help='Input vocabulary for questioner. Usually includes '
+            'total distinct words spoken by answerer, '
+            'questioner itself, and words by which the '
+            'goal is described.',
+        )
+        group.add_argument(
+            '--q-embed-size',
+            default=20,
+            type=int,
+            help='Size of word embeddings for questioner',
+        )
+        group.add_argument(
+            '--q-state-size',
+            default=100,
+            type=int,
+            help='Size of hidden state of questioner',
+        )
+        group.add_argument(
+            '--q-out-vocab',
+            default=3,
+            type=int,
+            help='Output vocabulary for questioner',
+        )
+        group.add_argument(
+            '--q-num-pred',
+            default=12,
+            type=int,
+            help='Size of output to be predicted (for goal).',
+        )
         super().add_cmdline_args(argparser)
 
     def __init__(self, opt, shared=None):
@@ -210,7 +248,9 @@ class QuestionerAgent(CooperativeGameAgent):
         opt['out_vocab_size'] = opt['q_out_vocab']
 
         # add a module for prediction (override self.modules later)
-        self.predict_net = PredictNet(opt['embed_size'], opt['state_size'], opt['num_pred'])
+        self.predict_net = PredictNet(
+            opt['embed_size'], opt['state_size'], opt['num_pred']
+        )
         super().__init__(opt, shared)
         self.id = 'QuestionerAgent'
 
@@ -243,20 +283,44 @@ class AnswererAgent(CooperativeGameAgent):
         values at according to (Kottur et al. 2017)."""
         DictionaryAgent.add_cmdline_args(argparser)
         group = argparser.add_argument_group('Questioner Agent Arguments')
-        parser.add_argument('--a-in-vocab', default=13, type=int,
-                            help='Input vocabulary for questioner. Usually includes total '
-                                 'distinct words spoken by answerer, questioner itself, '
-                                 'and words by which the goal is described.')
-        parser.add_argument('--a-embed-size', default=20, type=int,
-                            help='Size of word embeddings for questioner')
-        parser.add_argument('--a-state-size', default=100, type=int,
-                            help='Size of hidden state of questioner')
-        parser.add_argument('--a-out-vocab', default=3, type=int,
-                            help='Output vocabulary for questioner')
-        parser.add_argument('--a-img-feat-size', default=12, type=int,
-                            help='Size of output to be predicted (for goal).')
-        parser.add_argument('--a-memoryless', default=False, action='store_true',
-                            help='Whether to remember previous questions/answers encountered.')
+        group.add_argument(
+            '--a-in-vocab',
+            default=13,
+            type=int,
+            help='Input vocabulary for questioner. Usually includes '
+            'total distinct words spoken by answerer, questioner '
+            'itself, and words by which the goal is described.',
+        )
+        group.add_argument(
+            '--a-embed-size',
+            default=20,
+            type=int,
+            help='Size of word embeddings for questioner',
+        )
+        group.add_argument(
+            '--a-state-size',
+            default=100,
+            type=int,
+            help='Size of hidden state of questioner',
+        )
+        group.add_argument(
+            '--a-out-vocab',
+            default=3,
+            type=int,
+            help='Output vocabulary for questioner',
+        )
+        group.add_argument(
+            '--a-img-feat-size',
+            default=12,
+            type=int,
+            help='Size of output to be predicted (for goal).',
+        )
+        group.add_argument(
+            '--a-memoryless',
+            default=False,
+            action='store_true',
+            help='Whether to remember previous questions/answers ' 'encountered.',
+        )
         super().add_cmdline_args(argparser)
 
     def __init__(self, opt, shared=None):
@@ -267,7 +331,8 @@ class AnswererAgent(CooperativeGameAgent):
         opt['out_vocab_size'] = opt['a_out_vocab']
 
         # add a module for grounding visual content
-        # opt['a_img_input_size'] should be specified through custom arg or subclass, if needed
+        # opt['a_img_input_size'] should be specified through custom arg or
+        # subclass, if needed
         self.img_net = ImgNet(opt['a_img_feat_size'], opt.get('a_img_input_size', None))
         super().__init__(opt, shared)
         self.id = 'AnswererAgent'
