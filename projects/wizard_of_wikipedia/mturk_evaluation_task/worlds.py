@@ -90,8 +90,8 @@ class TopicsGenerator(object):
 
 
 class TopicChooseWorld(MTurkOnboardWorld):
-    """A world that provides topics to an MTurk Agent and asks them to choose
-    one.
+    """
+    A world that provides topics to an MTurk Agent and asks them to choose one.
     """
 
     def __init__(self, opt, mturk_agent, role='PERSON_1'):
@@ -143,7 +143,7 @@ class WizardEval(MultiAgentDialogWorld):
         opt,
         agents=None,
         shared=None,
-        range_turn=[3, 5],
+        range_turn=(3, 5),
         max_turn=5,
         max_resp_time=120,
         model_agent_opt=None,
@@ -246,7 +246,7 @@ class WizardEval(MultiAgentDialogWorld):
                 }
                 self.model_agent.observe(chosen_act)
                 model_act = self.model_agent.act()
-                model_act['id'] = 'PERSON_2'
+                model_act.force_set('id', 'PERSON_2')
                 self.dialog.append((1, model_act.get('text')))
                 self.eval_agent.observe(model_act)
             else:
@@ -300,8 +300,8 @@ class WizardEval(MultiAgentDialogWorld):
                     (' !', '!'),
                     ('i ', 'I '),
                 ]:
-                    act['text'] = act['text'].replace(sb_0, sb_1)
-                act['id'] = 'PERSON_2'
+                    act.force_set('text', act['text'].replace(sb_0, sb_1))
+                act.force_set('id', 'PERSON_2')
                 # NOTE: your model may or may not need to observe itself here
                 # If it does, call model_observes_itself or some other specialized
                 # function
@@ -318,9 +318,11 @@ class WizardEval(MultiAgentDialogWorld):
             self.eval_agent.observe(act)
 
     def parallel_eval_mode(self):
-        """Parallel function that shuts one agent down and asks the other
-        to do the evaluation if their are two agents. If there is only
-        one agent, it performs the evaluation.
+        """
+        Parallel function that shuts one agent down and asks the other to do the
+        evaluation if their are two agents.
+
+        If there is only one agent, it performs the evaluation.
         """
         global eval_or_shutdown
 

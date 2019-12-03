@@ -23,8 +23,8 @@ import math
 import numpy as np
 
 from parlai.core.torch_generator_agent import TorchGeneratorModel
-from parlai.core.utils import warn_once
-from parlai.core.utils import neginf
+from parlai.utils.misc import warn_once
+from parlai.utils.misc import neginf
 
 try:
     from apex.normalization.fused_layer_norm import FusedLayerNorm as LayerNorm
@@ -36,13 +36,17 @@ LAYER_NORM_EPS = 1e-5  # Epsilon for layer norm.
 
 
 def _normalize(tensor, norm_layer):
-    """Broadcast layer norm."""
+    """
+    Broadcast layer norm.
+    """
     size = tensor.size()
     return norm_layer(tensor.view(-1, size[-1])).view(size)
 
 
 def _create_embeddings(dictionary, embedding_size, padding_idx):
-    """Create and initialize word embeddings."""
+    """
+    Create and initialize word embeddings.
+    """
     e = nn.Embedding(len(dictionary), embedding_size, padding_idx)
     nn.init.normal_(e.weight, mean=0, std=embedding_size ** -0.5)
     nn.init.constant_(e.weight[padding_idx], 0)
@@ -113,6 +117,9 @@ def gelu(tensor):
 
 
 def get_n_positions_from_options(opt):
+    """
+    Determine n_positions from options dict.
+    """
     if opt.get('n_positions'):
         # if the number of positions is explicitly provided, use that
         n_positions = opt['n_positions']
@@ -129,7 +136,9 @@ def get_n_positions_from_options(opt):
 
 
 class TransformerMemNetModel(nn.Module):
-    """Model which takes context, memories, candidates and encodes them."""
+    """
+    Model which takes context, memories, candidates and encodes them.
+    """
 
     def __init__(self, opt, dictionary):
         super().__init__()
@@ -202,7 +211,9 @@ class TransformerMemNetModel(nn.Module):
         )
 
     def encode_cand(self, words):
-        """Encode the candidates."""
+        """
+        Encode the candidates.
+        """
         if words is None:
             return None
 
@@ -220,15 +231,17 @@ class TransformerMemNetModel(nn.Module):
 
         return encoded
 
-    def encode_context_memory(self, context_w, memories_w):
-        """Encode the memories."""
+    def encode_context_memory(self, context_w, memories_w, context_segments=None):
+        """
+        Encode the context and memories.
+        """
         # [batch, d]
         if context_w is None:
             # it's possible that only candidates were passed into the
             # forward function, return None here for LHS representation
             return None, None
 
-        context_h = self.context_encoder(context_w)
+        context_h = self.context_encoder(context_w, segments=context_segments)
 
         if memories_w is None:
             return [], context_h
@@ -243,11 +256,24 @@ class TransformerMemNetModel(nn.Module):
 
         return weights, context_h
 
-    def forward(self, xs, mems, cands):
-        """Forward pass."""
-        weights, context_h = self.encode_context_memory(xs, mems)
+    def forward(self, xs, mems, cands, context_segments=None):
+        """
+        Forward pass.
+
+        :param LongTensor[batch,seqlen] xs: input tokens IDs
+        :param LongTensor[batch,num_mems,seqlen] mems: memory token IDs
+        :param LongTensor[batch,num_cands,seqlen] cands: candidate token IDs
+        :param LongTensor[batch,seqlen] context_segments: segment IDs for xs,
+            used if n_segments is > 0 for the context encoder
+        """
+        # encode the context and memories together
+        weights, context_h = self.encode_context_memory(
+            xs, mems, context_segments=context_segments
+        )
+        # encode the candidates
         cands_h = self.encode_cand(cands)
 
+        # possibly normalize the context and candidate representations
         if self.opt['normalize_sent_emb']:
             context_h = context_h / context_h.norm(2, dim=1, keepdim=True)
             cands_h = cands_h / cands_h.norm(2, dim=1, keepdim=True)
@@ -256,7 +282,9 @@ class TransformerMemNetModel(nn.Module):
 
 
 def create_position_codes(n_pos, dim, out):
-    """Create positional codes and store them in ``out``."""
+    """
+    Create positional codes and store them in ``out``.
+    """
     position_enc = np.array(
         [
             [pos / np.power(10000, 2 * j / dim) for j in range(dim // 2)]
@@ -288,8 +316,31 @@ class TransformerResponseWrapper(nn.Module):
         )
 
     def forward(self, *args):
-        """Forward pass."""
+        """
+        Forward pass.
+        """
         return self.mlp(self.transformer(*args))
+
+
+class TransformerLinearWrapper(nn.Module):
+    """
+    Wrap a transformer in a linear layer.
+    """
+
+    def __init__(self, transformer, output_dim):
+        super().__init__()
+        self.transformer = transformer
+        input_dim = transformer.out_dim
+        self.additional_linear_layer = nn.Linear(input_dim, output_dim)
+
+    def forward(self, *args):
+        """
+        Forward pass.
+
+        Apply transformer, then additional linear layer.
+        """
+        context_h = self.transformer(*args)
+        return self.additional_linear_layer(context_h)
 
 
 class TransformerEncoder(nn.Module):
@@ -451,7 +502,8 @@ class TransformerEncoder(nn.Module):
                     x=positions.max().item(), y=self.n_positions
                 )
             )
-        tensor = tensor + self.position_embeddings(positions).expand_as(tensor)
+        position_embs = self.position_embeddings(positions).expand_as(tensor)
+        tensor = tensor + position_embs
 
         if self.n_segments >= 1:
             if segments is None:
@@ -477,9 +529,12 @@ class TransformerEncoder(nn.Module):
             divisor = mask.float().sum(dim=1).unsqueeze(-1).clamp(min=1).type_as(tensor)
             output = tensor.sum(dim=1) / divisor
             return output
-        elif self.reduction_type == 'none' or self.reduction_type is None:
+        elif self.reduction_type is None or 'none' in self.reduction_type:
             output = tensor
-            return output, mask
+            ret = (output, mask)
+            if self.reduction_type == 'none_with_pos_embs':
+                ret = (output, mask, position_embs)
+            return ret
         else:
             raise ValueError(
                 "Can't handle --reduction-type {}".format(self.reduction_type)
@@ -487,7 +542,9 @@ class TransformerEncoder(nn.Module):
 
 
 class TransformerEncoderLayer(nn.Module):
-    """Implements a single Transformer encoder layer."""
+    """
+    Implements a single Transformer encoder layer.
+    """
 
     def __init__(
         self,
@@ -519,7 +576,9 @@ class TransformerEncoderLayer(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, tensor, mask):
-        """Forward pass."""
+        """
+        Forward pass.
+        """
         tensor = tensor + self.dropout(self.attention(tensor, mask=mask))
         tensor = _normalize(tensor, self.norm1)
         tensor = tensor + self.dropout(self.ffn(tensor))
@@ -704,7 +763,9 @@ class TransformerDecoderLayer(nn.Module):
         self.norm3 = LayerNorm(embedding_size, eps=LAYER_NORM_EPS)
 
     def forward(self, x, encoder_output, encoder_mask):
-        """Forward pass."""
+        """
+        Forward pass.
+        """
         decoder_mask = self._create_selfattn_mask(x)
         # first self attn
         residual = x
@@ -743,7 +804,9 @@ class TransformerDecoderLayer(nn.Module):
 
 
 class TransformerGeneratorModel(TorchGeneratorModel):
-    """Implements a full generator model, with one encoder and one decoder."""
+    """
+    Implements a full generator model, with one encoder and one decoder.
+    """
 
     def __init__(self, opt, dictionary):
         self.pad_idx = dictionary[dictionary.null_token]
@@ -808,14 +871,18 @@ class TransformerGeneratorModel(TorchGeneratorModel):
         return None
 
     def output(self, tensor):
-        """Compute output logits."""
+        """
+        Compute output logits.
+        """
         # project back to vocabulary
         output = F.linear(tensor, self.embeddings.weight)
         return output
 
 
 class BasicAttention(nn.Module):
-    """Implements simple/classical attention."""
+    """
+    Implements simple/classical attention.
+    """
 
     def __init__(self, dim=1, attn='cosine', residual=False, get_weights=True):
         super().__init__()
@@ -827,10 +894,18 @@ class BasicAttention(nn.Module):
         self.get_weights = get_weights
         self.residual = residual
 
-    def forward(self, xs, ys, mask_ys=None):
-        """ xs: B x query_len x dim
-            ys: B x key_len x dim
-            TODO: Document this
+    def forward(self, xs, ys, mask_ys=None, values=None):
+        """
+        Compute attention.
+
+        Attend over ys with query xs to obtain weights, then apply weights to
+        values (ys if yalues is None)
+
+        Args:
+            xs: B x query_len x dim (queries)
+            ys: B x key_len x dim (keys)
+            mask_ys: B x key_len (mask)
+            values: B x value_len x dim (values); if None, default to ys
         """
         bsz = xs.size(0)
         y_len = ys.size(1)
@@ -847,7 +922,9 @@ class BasicAttention(nn.Module):
             attn_mask = attn_mask.repeat(1, x_len, 1)
             l1.masked_fill_(attn_mask, -float('inf'))
         l2 = self.softmax(l1)
-        lhs_emb = torch.bmm(l2, ys)
+        if values is None:
+            values = ys
+        lhs_emb = torch.bmm(l2, values)
 
         # # add back the query
         if self.residual:
@@ -885,7 +962,9 @@ class MultiHeadAttention(nn.Module):
         nn.init.xavier_normal_(self.out_lin.weight)
 
     def forward(self, query, key=None, value=None, mask=None):
-        """Forward pass."""
+        """
+        Forward pass.
+        """
         # TODO: there are a lot of parameters to document here.
 
         # Input is [B, query_len, dim]
@@ -955,7 +1034,9 @@ class MultiHeadAttention(nn.Module):
 
 
 class TransformerFFN(nn.Module):
-    """Implements the FFN part of the transformer."""
+    """
+    Implements the FFN part of the transformer.
+    """
 
     def __init__(self, dim, dim_hidden, relu_dropout=0, activation='relu'):
         super(TransformerFFN, self).__init__()
@@ -975,7 +1056,9 @@ class TransformerFFN(nn.Module):
         # TODO: initialize biases to 0
 
     def forward(self, x):
-        """Forward pass."""
+        """
+        Forward pass.
+        """
         x = self.nonlinear(self.lin1(x))
         x = self.relu_dropout(x)  # --relu-dropout
         x = self.lin2(x)

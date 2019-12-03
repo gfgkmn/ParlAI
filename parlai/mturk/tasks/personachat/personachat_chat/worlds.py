@@ -64,7 +64,8 @@ class PersonasGenerator(object):
             self.add_idx_stack()
         idx = self.idx_stack.pop()
         data = np.load(
-            os.path.join(self.personas_path, self.personas_name_list[int(idx)])
+            os.path.join(self.personas_path, self.personas_name_list[int(idx)]),
+            allow_pickle=True,
         )
         return (idx, data)
 
@@ -77,7 +78,9 @@ class PersonasGenerator(object):
 
 
 class PersonaProfileWorld(MTurkOnboardWorld):
-    """A world that provides a persona to the MTurkAgent"""
+    """
+    A world that provides a persona to the MTurkAgent.
+    """
 
     def __init__(self, opt, mturk_agent):
         self.task_type = 'sandbox' if opt['is_sandbox'] else 'live'

@@ -14,7 +14,8 @@ from .modules import MemNN, opt_to_kwargs
 
 
 class MemnnAgent(TorchRankerAgent):
-    """Memory Network agent.
+    """
+    Memory Network agent.
 
     Tips:
     - time features are necessary when memory order matters
@@ -69,10 +70,9 @@ class MemnnAgent(TorchRankerAgent):
         """
         Return current version of this model, counting up from 0.
 
-        Models may not be backwards-compatible with older versions.
-        Version 1 split from version 0 on Sep 7, 2018.
-        To use version 0, use --model legacy:memnn:0
-        (legacy agent code is located in parlai/agents/legacy_agents).
+        Models may not be backwards-compatible with older versions. Version 1 split from
+        version 0 on Sep 7, 2018. To use version 0, use --model legacy:memnn:0 (legacy
+        agent code is located in parlai/agents/legacy_agents).
         """
         # TODO: Update date that Version 2 split and move version 1 to legacy
         return 2
@@ -86,18 +86,22 @@ class MemnnAgent(TorchRankerAgent):
         super().__init__(opt, shared)
 
     def build_dictionary(self):
-        """Add the time features to the dictionary before building the model."""
+        """
+        Add the time features to the dictionary before building the model.
+        """
         d = super().build_dictionary()
         if self.use_time_features:
             # add time features to dictionary before building the model
             for i in range(self.memsize):
-                d[self._time_feature(i)] = 100000000 + i
+                d[self._time_feature(i)] = 100_000_000 + i
         return d
 
     def build_model(self):
-        """Build MemNN model."""
+        """
+        Build MemNN model.
+        """
         kwargs = opt_to_kwargs(self.opt)
-        self.model = MemNN(
+        return MemNN(
             len(self.dict),
             self.opt['embedding_size'],
             padding_idx=self.NULL_IDX,
@@ -134,17 +138,23 @@ class MemnnAgent(TorchRankerAgent):
 
     @lru_cache(maxsize=None)  # bounded by opt['memsize'], cache string concats
     def _time_feature(self, i):
-        """Return time feature token at specified index."""
+        """
+        Return time feature token at specified index.
+        """
         return '__tf{}__'.format(i)
 
     def vectorize(self, *args, **kwargs):
-        """Override options in vectorize from parent."""
+        """
+        Override options in vectorize from parent.
+        """
         kwargs['add_start'] = False
         kwargs['add_end'] = False
         return super().vectorize(*args, **kwargs)
 
     def batchify(self, obs_batch, sort=False):
-        """Override so that we can add memories to the Batch object."""
+        """
+        Override so that we can add memories to the Batch object.
+        """
         batch = super().batchify(obs_batch, sort)
 
         # get valid observations
@@ -163,13 +173,15 @@ class MemnnAgent(TorchRankerAgent):
         return batch
 
     def _set_text_vec(self, obs, history, truncate):
-        """Override from Torch Agent so that we can use memories."""
+        """
+        Override from Torch Agent so that we can use memories.
+        """
         if 'text' not in obs:
             return obs
 
         if 'text_vec' not in obs:
             # text vec is not precomputed, so we set it using the history
-            obs['text'] = history.get_history_str()
+            obs['full_text'] = history.get_history_str()
             history_vecs = history.get_history_vec_list()
             if len(history_vecs) > 0:
                 obs['memory_vecs'] = history_vecs[:-1]
@@ -180,15 +192,17 @@ class MemnnAgent(TorchRankerAgent):
 
         # check truncation
         if 'text_vec' in obs:
-            obs['text_vec'] = torch.LongTensor(
-                self._check_truncate(obs['text_vec'], truncate, True)
-            )
+            truncated_vec = self._check_truncate(obs['text_vec'], truncate, True)
+            obs.force_set('text_vec', torch.LongTensor(truncated_vec))
 
         if 'memory_vecs' in obs:
-            obs['memory_vecs'] = [
-                torch.LongTensor(self._check_truncate(m, truncate, True))
-                for m in obs['memory_vecs']
-            ]
+            obs.force_set(
+                'memory_vecs',
+                [
+                    torch.LongTensor(self._check_truncate(m, truncate, True))
+                    for m in obs['memory_vecs']
+                ],
+            )
 
         return obs
 

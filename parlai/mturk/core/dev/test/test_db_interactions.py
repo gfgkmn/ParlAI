@@ -10,17 +10,19 @@ import time
 import uuid
 from datetime import datetime
 
-from parlai.mturk.core.mturk_data_handler import MTurkDataHandler
-from parlai.mturk.core.agents import AssignState
+from parlai.mturk.core.dev.mturk_data_handler import MTurkDataHandler
+from parlai.mturk.core.dev.agents import AssignState
 
-import parlai.mturk.core.mturk_data_handler as DataHandlerFile
+import parlai.mturk.core.dev.mturk_data_handler as DataHandlerFile
 
 data_dir = os.path.dirname(os.path.abspath(__file__))
 DataHandlerFile.data_dir = data_dir
 
 
 class TestDataHandler(unittest.TestCase):
-    '''Various unit tests for the SQLite database'''
+    """
+    Various unit tests for the SQLite database.
+    """
 
     DB_NAME = 'test_db.db'
 

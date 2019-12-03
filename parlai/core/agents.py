@@ -38,11 +38,10 @@ This module also provides a utility method:
     ``create_task_agents(str)``: instantiate task-specific agents (e.g. a teacher)
     from a given task string (e.g. 'babi:task1k:1' or 'squad'). Used by
     ``MultiTaskTeacher``.
-
 """
 
 from parlai.core.build_data import modelzoo_path
-from parlai.core.utils import warn_once, load_opt_file
+from parlai.utils.misc import warn_once, load_opt_file
 from .metrics import Metrics, aggregate_metrics
 import copy
 import importlib
@@ -51,7 +50,9 @@ import os
 
 
 class Agent(object):
-    """Base class for all other agents."""
+    """
+    Base class for all other agents.
+    """
 
     def __init__(self, opt, shared=None):
         if not hasattr(self, 'id'):
@@ -61,12 +62,16 @@ class Agent(object):
         self.observation = None
 
     def observe(self, observation):
-        """Receive an observation/action dict."""
+        """
+        Receive an observation/action dict.
+        """
         self.observation = observation
         return observation
 
     def act(self):
-        """Return an observation/action dict based upon given observation."""
+        """
+        Return an observation/action dict based upon given observation.
+        """
         if hasattr(self, 'observation') and self.observation is not None:
             print('agent received observation:')
             print(self.observation)
@@ -78,7 +83,9 @@ class Agent(object):
         return t
 
     def getID(self):
-        """Return the agent ID."""
+        """
+        Return the agent ID.
+        """
         return self.id
 
     def epoch_done(self):
@@ -101,8 +108,8 @@ class Agent(object):
         """
         Reset any metrics reported by this agent.
 
-        This is called to indicate metrics should start fresh, and is typically
-        called between loggings or after a `report()`.
+        This is called to indicate metrics should start fresh, and is typically called
+        between loggings or after a `report()`.
         """
         pass
 
@@ -114,13 +121,21 @@ class Agent(object):
         """
         pass
 
+    def clone(self):
+        """
+        Make a shared copy of this agent.
+
+        Should be the same as using create_agent_from_shared(.), but slightly easier.
+        """
+        return type(self)(self.opt, self.share())
+
     def share(self):
         """
         Share any parameters needed to create a shared version of this agent.
 
-        Default implementation shares the class and the opt, but most agents will
-        want to also add model weights, teacher data, etc. This especially useful
-        for avoiding providing pointers to large objects to all agents in a batch.
+        Default implementation shares the class and the opt, but most agents will want
+        to also add model weights, teacher data, etc. This especially useful for
+        avoiding providing pointers to large objects to all agents in a batch.
         """
         shared = {}
         shared['class'] = type(self)
@@ -128,8 +143,53 @@ class Agent(object):
         return shared
 
     def shutdown(self):
-        """Perform any final cleanup if needed."""
+        """
+        Perform any final cleanup if needed.
+        """
         pass
+
+    @classmethod
+    def upgrade_opt(cls, opt_from_disk):
+        """
+        Upgrade legacy options when loading an opt file from disk.
+
+        This is primarily made available to provide a safe space to handle
+        backwards-compatible behavior. For example, perhaps we introduce a
+        new option today, which wasn't previously available. We can have the
+        argument have a new default, but fall back to the "legacy" compatibility
+        behavior if the option doesn't exist.
+
+        ``upgrade_opt`` provides an opportunity for such checks for backwards
+        compatibility. It is called shortly after loading the opt file from
+        disk, and is called before the Agent is initialized.
+
+        Other possible examples include:
+
+            1. Renaming an option,
+            2. Deprecating an old option,
+            3. Splitting coupled behavior, etc.
+
+        Implementations of ``upgrade_opt`` should conform to high standards,
+        due to the risk of these methods becoming complicated and difficult to
+        reason about. We recommend the following behaviors:
+
+            1. ``upgrade_opt`` should only be used to provide backwards
+            compatibility.  Other behavior should find a different location.
+            2. Children should always call the parent's ``upgrade_opt`` first.
+            3. ``upgrade_opt`` should always warn when an option was overwritten.
+            4. Include comments annotating the date and purpose of each upgrade.
+            5. Add an integration test which ensures your old work behaves
+            appropriately.
+
+        :param Opt opt_from_disk:
+            The opt file, as loaded from the ``.opt`` file on disk.
+        :return:
+            The modified options
+        :rtype:
+            Opt
+        """
+        # 2019-07-11: currently a no-op.
+        return opt_from_disk
 
 
 class Teacher(Agent):
@@ -153,13 +213,17 @@ class Teacher(Agent):
 
     # return state/action dict based upon passed state
     def act(self):
-        """Act upon the previous observation."""
+        """
+        Act upon the previous observation.
+        """
         if self.observation is not None and 'text' in self.observation:
             t = {'text': 'Hello agent!'}
         return t
 
     def epoch_done(self):
-        """Return whether the epoch is done."""
+        """
+        Return whether the epoch is done.
+        """
         return self.epochDone
 
     # Default unknown length
@@ -180,21 +244,29 @@ class Teacher(Agent):
         return None
 
     def report(self):
-        """Return metrics showing total examples and accuracy if available."""
+        """
+        Return metrics showing total examples and accuracy if available.
+        """
         return self.metrics.report()
 
     def reset(self):
-        """Reset the teacher."""
+        """
+        Reset the teacher.
+        """
         super().reset()
         self.reset_metrics()
         self.epochDone = False
 
     def reset_metrics(self):
-        """Reset metrics."""
+        """
+        Reset metrics.
+        """
         self.metrics.clear()
 
     def share(self):
-        """In addition to default Agent shared parameters, share metrics."""
+        """
+        In addition to default Agent shared parameters, share metrics.
+        """
         shared = super().share()
         shared['metrics'] = self.metrics
         return shared
@@ -245,7 +317,9 @@ class MultiTaskTeacher(Teacher):
             sum += weight
 
     def num_examples(self):
-        """Return the number of examples."""
+        """
+        Return the number of examples.
+        """
         if not hasattr(self, 'num_exs'):
             # num_examples is sum of all examples in all tasks
             tasks_num_exs = [t.num_examples() for t in self.tasks]
@@ -256,7 +330,9 @@ class MultiTaskTeacher(Teacher):
         return self.num_exs
 
     def num_episodes(self):
-        """Return the number of episodes."""
+        """
+        Return the number of episodes.
+        """
         if not hasattr(self, 'num_eps'):
             # num_episodes is sum of all num_episodes in all tasks
             tasks_num_eps = [t.num_episodes() for t in self.tasks]
@@ -267,11 +343,15 @@ class MultiTaskTeacher(Teacher):
         return self.num_eps
 
     def observe(self, observation):
-        """Make an observation."""
+        """
+        Make an observation.
+        """
         return self.tasks[self.task_idx].observe(observation)
 
     def act(self):
-        """Act on the previous observation."""
+        """
+        Act on the previous observation.
+        """
         if self.new_task:
             self.new_task = False
             if self.random:
@@ -295,7 +375,9 @@ class MultiTaskTeacher(Teacher):
         return t
 
     def epoch_done(self):
-        """Return whether all subtasks are completed."""
+        """
+        Return whether all subtasks are completed.
+        """
         for t in self.tasks:
             if not t.epoch_done():
                 return False
@@ -303,26 +385,36 @@ class MultiTaskTeacher(Teacher):
 
     # return transformed metrics showing total examples and accuracy if avail.
     def report(self):
-        """Report aggregated metrics across all subtasks."""
+        """
+        Report aggregated metrics across all subtasks.
+        """
         return aggregate_metrics(self.tasks)
 
     def reset(self):
-        """Reset all subtasks."""
+        """
+        Reset all subtasks.
+        """
         for t in self.tasks:
             t.reset()
 
     def reset_metrics(self):
-        """Reset metrics for each subtask."""
+        """
+        Reset metrics for each subtask.
+        """
         for t in self.tasks:
             t.reset_metrics()
 
     def save(self):
-        """Save each subtask."""
+        """
+        Save each subtask.
+        """
         for t in self.tasks:
             t.save()
 
     def share(self):
-        """Shares this teacher by sharing each subtask."""
+        """
+        Shares this teacher by sharing each subtask.
+        """
         shared = {}
         shared['class'] = type(self)
         shared['opt'] = self.opt
@@ -330,7 +422,9 @@ class MultiTaskTeacher(Teacher):
         return shared
 
     def shutdown(self):
-        """Shutdown each agent."""
+        """
+        Shutdown each agent.
+        """
         for t in self.tasks:
             t.shutdown()
 
@@ -356,7 +450,9 @@ def name_to_agent_class(name):
 
 
 def compare_init_model_opts(opt, curr_opt):
-    """Print loud warning when `init_model` opts differ from previous configuration."""
+    """
+    Print loud warning when `init_model` opts differ from previous configuration.
+    """
     if opt.get('init_model') is None:
         return
     opt['init_model'] = modelzoo_path(opt['datapath'], opt['init_model'])
@@ -367,7 +463,14 @@ def compare_init_model_opts(opt, curr_opt):
 
     extra_opts = {}
     different_opts = {}
-    exempt_opts = ['model_file', 'dict_file', 'override', 'starttime', 'init_model']
+    exempt_opts = [
+        'model_file',
+        'dict_file',
+        'override',
+        'starttime',
+        'init_model',
+        'batchindex',
+    ]
 
     # search through init model opts
     for k, v in init_model_opt.items():
@@ -445,23 +548,7 @@ def load_agent_module(opt):
                         "previously: {} )]".format(k, v, new_opt.get(k, None))
                     )
                 new_opt[k] = v
-        # add model arguments to new_opt if they aren't in new_opt already
-        for k, v in opt.items():
-            if k not in new_opt:
-                new_opt[k] = v
-        new_opt['model_file'] = model_file
-        if not new_opt.get('dict_file'):
-            new_opt['dict_file'] = model_file + '.dict'
-        elif new_opt.get('dict_file') and not os.path.isfile(new_opt['dict_file']):
-            old_dict_file = new_opt['dict_file']
-            new_opt['dict_file'] = model_file + '.dict'
-        if not os.path.isfile(new_opt['dict_file']):
-            warn_once(
-                'WARNING: Neither the specified dict file ({}) nor the '
-                '`model_file`.dict file ({}) exists, check to make sure either '
-                'is correct. This may manifest as a shape mismatch later '
-                'on.'.format(old_dict_file, new_opt['dict_file'])
-            )
+
         model_class = get_agent_module(new_opt['model'])
 
         # check for model version
@@ -486,6 +573,27 @@ def load_agent_module(opt):
                     raise RuntimeError(
                         m.format(m='modelname', v=curr_version, c='ModelAgent')
                     )
+
+        if hasattr(model_class, 'upgrade_opt'):
+            new_opt = model_class.upgrade_opt(new_opt)
+
+        # add model arguments to new_opt if they aren't in new_opt already
+        for k, v in opt.items():
+            if k not in new_opt:
+                new_opt[k] = v
+        new_opt['model_file'] = model_file
+        if not new_opt.get('dict_file'):
+            new_opt['dict_file'] = model_file + '.dict'
+        elif new_opt.get('dict_file') and not os.path.isfile(new_opt['dict_file']):
+            old_dict_file = new_opt['dict_file']
+            new_opt['dict_file'] = model_file + '.dict'
+        if not os.path.isfile(new_opt['dict_file']):
+            warn_once(
+                'WARNING: Neither the specified dict file ({}) nor the '
+                '`model_file`.dict file ({}) exists, check to make sure either '
+                'is correct. This may manifest as a shape mismatch later '
+                'on.'.format(old_dict_file, new_opt['dict_file'])
+            )
 
         # if we want to load weights from --init-model, compare opts with
         # loaded ones
@@ -738,7 +846,6 @@ def get_task_module(taskname):
     return teacher_class
 
 
-# TODO: remove this. It was added but doesn't have a clear use case now.
 def _add_task_flags_to_agent_opt(agent, opt, flags):
     """
     Handle task flags provided by the task name itself.
@@ -750,7 +857,7 @@ def _add_task_flags_to_agent_opt(agent, opt, flags):
     for f in fl:
         if '=' in f:
             one_flag = f.split('=')
-            opt[one_flag[0]] = one_flag[1]
+            opt[one_flag[0].replace('-', '_')] = one_flag[1].replace(';', ':')
         else:
             task.append(f)
     opt['task'] = ':'.join(task)
@@ -760,11 +867,10 @@ def create_task_agent_from_taskname(opt):
     """
     Create task agent(s) assuming the input ``task_dir:teacher_class``.
 
-    e.g. def_string is a shorthand path like ``babi:Task1k:1`` or ``#babi``
-    or a complete path like ``parlai.tasks.babi.agents:Task1kTeacher:1``,
-    which essentially performs ``from parlai.tasks.babi import Task1kTeacher``
-    with the parameter ``1`` in ``opt['task']`` to be used by the class
-    ``Task1kTeacher``.
+    e.g. def_string is a shorthand path like ``babi:Task1k:1`` or ``#babi`` or a
+    complete path like ``parlai.tasks.babi.agents:Task1kTeacher:1``, which essentially
+    performs ``from parlai.tasks.babi import Task1kTeacher`` with the parameter ``1`` in
+    ``opt['task']`` to be used by the class ``Task1kTeacher``.
     """
     if not (
         opt.get('task')
@@ -794,46 +900,3 @@ def create_task_agent_from_taskname(opt):
         if type(task_agents) != list:
             task_agents = [task_agents]
         return task_agents
-
-
-def _create_task_agents(opt):
-    """
-    Create task agent(s) for the given task name.
-
-    It does this by calling the create_agent function in agents.py of the
-    given task.
-    If create_agents function does not exist, it just looks for
-    the teacher (agent) class defined by the task name directly.
-    (This saves the task creator bothering to define the
-    create_agents function when it is not needed.)
-    """
-    sp = opt['task'].strip()
-    repo = 'parlai'
-    if sp.startswith('internal:'):
-        # To switch to local repo, useful for non-public projects
-        # (make a directory called 'parlai_internal' with your private agents)
-        repo = 'parlai_internal'
-        sp = sp[9:]
-    sp = sp.split(':')
-    if '.' in sp[0]:
-        # The case of opt['task'] = 'parlai.tasks.squad.agents:DefaultTeacher'
-        # (i.e. specifying your own path directly)
-        module_name = sp[0]
-    elif sp[0] == 'pytorch_teacher':
-        module_name = 'parlai.core.pytorch_data_teacher'
-    else:
-        task = sp[0].lower()
-        module_name = "%s.tasks.%s.agents" % (repo, task)
-    my_module = importlib.import_module(module_name)
-    try:
-        # Tries to call the create_agent function in agents.py
-        task = sp[0].lower()
-        task_agents = my_module.create_agents(opt, task)
-    except AttributeError:
-        # Create_agent not found, so try to create the teacher directly.
-        return create_task_agent_from_taskname(opt)
-        # in squad there are not create_agents implement.
-        # so we create_task_agent_from_taskname
-    if type(task_agents) != list:
-        task_agents = [task_agents]
-    return task_agents

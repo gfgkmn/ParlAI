@@ -3,8 +3,8 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-"""Generates a pytorch data file from the training data; for use in the
-PytorchDataTeacher.
+"""
+Generates a pytorch data file from the training data; for use in the PytorchDataTeacher.
 
 Note that with our given implementation of batch act, episodes are compressed
 such that each episode is one example for a model.
@@ -13,6 +13,7 @@ One can set the ``--context-len`` flag to specify how many past utterances
 are used in a flattened episode.
 """
 from parlai.core.agents import create_agent
+from parlai.core.message import Message
 from parlai.core.worlds import create_task
 from parlai.scripts.build_dict import build_dict, setup_args as dict_setup
 import copy
@@ -105,7 +106,7 @@ def build_data(opt):
     ordered_opt.pop('pytorch_teacher_dataset')
     ordered_opt['no_cuda'] = True
     world_data = create_task(ordered_opt, agent)
-    teacher = world_data.agents[0]
+    teacher = world_data.get_task_agent()
     agent = world_data.agents[1]
     datapath = os.path.join(
         opt.get('datapath', '.'),
@@ -141,7 +142,9 @@ def build_data(opt):
     with open(os.path.join(datapath, 'data'), 'w') as pytorch_data:
         while num_exs < total_exs:
             while not episode_done:
-                action = teacher.act()
+                # TODO: eventually all teachers should return Messages, so
+                # we should assert this
+                action = Message(teacher.act())
                 current.append(action)
                 episode_done = action.get('episode_done', False)
 
@@ -149,8 +152,8 @@ def build_data(opt):
             for ex in current:
                 context.append(ex.get('text', ''))
                 if len(context) > 1:
-                    ex['text'] = '\n'.join(context)
-                ex['episode_done'] = True
+                    ex.force_set('text', '\n'.join(context))
+                ex.force_set('episode_done', True)
                 labels = ex.get('labels', ex.get('eval_labels', None))
                 if labels is not None and include_labels:
                     context.append(random.choice(labels))

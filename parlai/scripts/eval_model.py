@@ -4,8 +4,9 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Basic example which iterates through the tasks specified and
-evaluates the given model on them.
+"""
+Basic example which iterates through the tasks specified and evaluates the given model
+on them.
 
 Examples
 --------
@@ -21,7 +22,7 @@ from parlai.core.agents import create_agent
 from parlai.core.logs import TensorboardLogger
 from parlai.core.metrics import aggregate_task_reports
 from parlai.core.worlds import create_task
-from parlai.core.utils import TimeLogger
+from parlai.utils.misc import TimeLogger
 
 import random
 
@@ -44,12 +45,14 @@ def setup_args(parser=None):
         'number of tasks.',
     )
     parser.add_argument(
+        '-mcs',
         '--metrics',
         type=str,
-        default='all',
-        help='list of metrics to show/compute, e.g. '
-        'ppl, f1, accuracy, hits@1.'
-        'If `all` is specified [default] all are shown.',
+        default='default',
+        help='list of metrics to show/compute, e.g. all, default,'
+        'or give a list split by , like '
+        'ppl,f1,accuracy,hits@1,rouge,bleu'
+        'the rouge metrics will be computed as rouge-1, rouge-2 and rouge-l',
     )
     TensorboardLogger.add_cmdline_args(parser)
     parser.set_defaults(datatype='valid')
@@ -93,7 +96,8 @@ def _eval_single_world(opt, agent, task):
 
 
 def eval_model(opt, print_parser=None):
-    """Evaluates a model.
+    """
+    Evaluates a model.
 
     :param opt: tells the evaluation function how to run
     :param bool print_parser: if provided, prints the options that are set within the

@@ -4,12 +4,14 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Torch Classifier Agents classify text into a fixed set of labels."""
+"""
+Torch Classifier Agents classify text into a fixed set of labels.
+"""
 
 
-from parlai.core.distributed_utils import is_distributed
+from parlai.utils.distributed import is_distributed
 from parlai.core.torch_agent import TorchAgent, Output
-from parlai.core.utils import round_sigfigs, warn_once
+from parlai.utils.misc import round_sigfigs, warn_once
 from collections import defaultdict
 
 import torch
@@ -20,13 +22,15 @@ class TorchClassifierAgent(TorchAgent):
     """
     Abstract Classifier agent. Only meant to be extended.
 
-    TorchClassifierAgent aims to handle much of the bookkeeping any
-    classification model.
+    TorchClassifierAgent aims to handle much of the bookkeeping any classification
+    model.
     """
 
     @staticmethod
     def add_cmdline_args(parser):
-        """Add CLI args."""
+        """
+        Add CLI args.
+        """
         TorchAgent.add_cmdline_args(parser)
         parser = parser.add_argument_group('Torch Classifier Arguments')
         # class arguments
@@ -81,16 +85,28 @@ class TorchClassifierAgent(TorchAgent):
             default=True,
             help='give prec/recall metrics for all classes',
         )
+        parser.add_argument(
+            '--classes-from-file',
+            type=str,
+            default=None,
+            help='loads the list of classes from a file',
+        )
 
     def __init__(self, opt, shared=None):
-        init_model, _ = self._get_init_model(opt, shared)
+        init_model, self.is_finetune = self._get_init_model(opt, shared)
         super().__init__(opt, shared)
 
         # set up classes
-        if opt.get('classes') is None:
-            raise RuntimeError('Must specify --classes argument.')
+        if opt.get('classes') is None and opt.get('classes_from_file') is None:
+            raise RuntimeError(
+                'Must specify --classes or --classes-from-file argument.'
+            )
         if not shared:
-            self.class_list = opt['classes']
+            if opt['classes_from_file'] is not None:
+                with open(opt['classes_from_file']) as f:
+                    self.class_list = f.read().splitlines()
+            else:
+                self.class_list = opt['classes']
             self.class_dict = {val: i for i, val in enumerate(self.class_list)}
             if opt.get('class_weights', None) is not None:
                 self.class_weights = opt['class_weights']
@@ -125,24 +141,29 @@ class TorchClassifierAgent(TorchAgent):
             self.threshold = None
 
         # set up model and optimizers
-        weight_tensor = torch.FloatTensor(self.class_weights)
-        self.classifier_loss = torch.nn.CrossEntropyLoss(weight_tensor)
+
         if shared:
             self.model = shared['model']
         else:
-            self.build_model()
+            self.model = self.build_model()
+            self.criterion = self.build_criterion()
+            if self.model is None or self.criterion is None:
+                raise AttributeError(
+                    'build_model() and build_criterion() need to return the model or criterion'
+                )
+            if self.use_cuda:
+                self.model.cuda()
+                self.criterion.cuda()
             if init_model:
                 print('Loading existing model parameters from ' + init_model)
                 self.load(init_model)
-        if self.use_cuda:
-            self.model.cuda()
-            self.classifier_loss.cuda()
-            if self.opt['data_parallel']:
-                if is_distributed():
-                    raise ValueError(
-                        'Cannot combine --data-parallel and distributed mode'
-                    )
-                self.model = torch.nn.DataParallel(self.model)
+            if self.use_cuda:
+                if self.opt['data_parallel']:
+                    if is_distributed():
+                        raise ValueError(
+                            'Cannot combine --data-parallel and distributed mode'
+                        )
+                    self.model = torch.nn.DataParallel(self.model)
         if shared:
             # We don't use get here because hasattr is used on optimizer later.
             if 'optimizer' in shared:
@@ -152,13 +173,18 @@ class TorchClassifierAgent(TorchAgent):
             self.init_optim(optim_params)
             self.build_lr_scheduler()
 
+    def build_criterion(self):
+        weight_tensor = torch.FloatTensor(self.class_weights)
+        return torch.nn.CrossEntropyLoss(weight_tensor)
+
     def share(self):
-        """Share model parameters."""
+        """
+        Share model parameters.
+        """
         shared = super().share()
         shared['class_dict'] = self.class_dict
         shared['class_list'] = self.class_list
         shared['class_weights'] = self.class_weights
-        shared['metrics'] = self.metrics
         shared['model'] = self.model
         shared['optimizer'] = self.optimizer
         return shared
@@ -194,7 +220,9 @@ class TorchClassifierAgent(TorchAgent):
             self.metrics['confusion_matrix'][(label, pred)] += 1
 
     def _format_interactive_output(self, probs, prediction_id):
-        """Format interactive mode output with scores."""
+        """
+        Format interactive mode output with scores.
+        """
         preds = []
         for i, pred_id in enumerate(prediction_id.tolist()):
             prob = round_sigfigs(probs[i][pred_id], 4)
@@ -206,7 +234,9 @@ class TorchClassifierAgent(TorchAgent):
         return preds
 
     def train_step(self, batch):
-        """Train on a single batch of examples."""
+        """
+        Train on a single batch of examples.
+        """
         if batch.text_vec is None:
             return Output()
         self.model.train()
@@ -215,7 +245,7 @@ class TorchClassifierAgent(TorchAgent):
         # calculate loss
         labels = self._get_labels(batch)
         scores = self.score(batch)
-        loss = self.classifier_loss(scores, labels)
+        loss = self.criterion(scores, labels)
         loss.backward()
         self.update_params()
 
@@ -231,7 +261,9 @@ class TorchClassifierAgent(TorchAgent):
         return Output(preds)
 
     def eval_step(self, batch):
-        """Train on a single batch of examples."""
+        """
+        Train on a single batch of examples.
+        """
         if batch.text_vec is None:
             return
 
@@ -252,7 +284,7 @@ class TorchClassifierAgent(TorchAgent):
                 preds = self._format_interactive_output(probs, prediction_id)
         else:
             labels = self._get_labels(batch)
-            loss = self.classifier_loss(scores, labels)
+            loss = self.criterion(scores, labels)
             self.metrics['loss'] += loss.item()
             self.metrics['examples'] += len(batch.text_vec)
             self._update_confusion_matrix(batch, preds)
@@ -260,8 +292,9 @@ class TorchClassifierAgent(TorchAgent):
         return Output(preds)
 
     def reset_metrics(self):
-        """Reset metrics."""
-        self.metrics = {}
+        """
+        Reset metrics.
+        """
         super().reset_metrics()
         self.metrics['confusion_matrix'] = defaultdict(int)
         self.metrics['examples'] = 0
@@ -305,7 +338,9 @@ class TorchClassifierAgent(TorchAgent):
         return num_actual_positives
 
     def report(self):
-        """Report loss as well as precision, recall, and F1 metrics."""
+        """
+        Report loss as well as precision, recall, and F1 metrics.
+        """
         m = super().report()
         examples = self.metrics['examples']
         if examples > 0:
@@ -351,7 +386,3 @@ class TorchClassifierAgent(TorchAgent):
             class.
         """
         raise NotImplementedError('Abstract class: user must implement score()')
-
-    def build_model(self):
-        """Build a new model (implemented by children classes)."""
-        raise NotImplementedError('Abstract class: user must implement build_model()')

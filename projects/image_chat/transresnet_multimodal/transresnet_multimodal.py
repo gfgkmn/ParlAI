@@ -3,10 +3,13 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-"""Transresnet Multimodal Model (https://arxiv.org/abs/1811.00945)."""
+"""
+Transresnet Multimodal Model (https://arxiv.org/abs/1811.00945).
+"""
 
 from parlai.core.dict import DictionaryAgent
-from parlai.core.utils import round_sigfigs
+from parlai.utils.misc import round_sigfigs
+from parlai.core.message import Message
 from .modules import TransresnetMultimodalModel
 from projects.personality_captions.transresnet.transresnet import TransresnetAgent
 
@@ -36,7 +39,9 @@ class TransresnetMultimodalAgent(TransresnetAgent):
 
     @staticmethod
     def add_cmdline_args(argparser):
-        """Override to add personality-override option."""
+        """
+        Override to add personality-override option.
+        """
         TransresnetMultimodalModel.add_cmdline_args(argparser)
         TransresnetAgent.add_cmdline_args(argparser)
         arg_group = argparser.add_argument_group("TransresnetMultimodal Arguments")
@@ -92,7 +97,9 @@ class TransresnetMultimodalAgent(TransresnetAgent):
             self.model.cuda()
 
     def _setup_cands(self):
-        """Override for different call to model."""
+        """
+        Override for different call to model.
+        """
         self.fixed_cands = None
         self.fixed_cands_enc = None
         if self.fcp is not None:
@@ -116,7 +123,7 @@ class TransresnetMultimodalAgent(TransresnetAgent):
                 fixed_cands_enc = []
                 for _, batch in enumerate(
                     [
-                        self.fixed_cands[i:i + 50]
+                        self.fixed_cands[i : i + 50]
                         for i in range(0, len(self.fixed_cands) - 50, 50)
                     ]
                 ):
@@ -127,7 +134,9 @@ class TransresnetMultimodalAgent(TransresnetAgent):
                 torch.save(self.fixed_cands_enc, cands_enc_file)
 
     def share(self):
-        """Override to share optimizer."""
+        """
+        Override to share optimizer.
+        """
         shared = super().share()
         shared["optimizer"] = self.optimizer
         return shared
@@ -144,6 +153,8 @@ class TransresnetMultimodalAgent(TransresnetAgent):
         :return:
             the observation, with dialogue history included.
         """
+        observation = Message(observation)  # TODO: eventually this will not be
+        # necessary as we migrate all teachers to return Message objects
         self.observation = self.get_dialogue_history(observation)
         return self.observation
 
@@ -316,7 +327,7 @@ class TransresnetMultimodalAgent(TransresnetAgent):
             the observation with the dialogue history in the `text` field
         """
         if len(self.history) > 0:
-            obs["text"] = "\n".join(self.history) + "\n" + obs["text"]
+            obs.force_set("text", "\n".join(self.history) + "\n" + obs["text"])
         if "labels" in obs:
             self.history.append(random.choice(obs["labels"]))
         elif "eval_labels" in obs:
@@ -391,12 +402,16 @@ class TransresnetMultimodalAgent(TransresnetAgent):
                     print("Done")
 
     def reset(self):
-        """Override to reset dialogue history."""
+        """
+        Override to reset dialogue history.
+        """
         super().reset()
         self.history.clear()
 
     def reset_metrics(self):
-        """Reset per-dialogue round metrics."""
+        """
+        Reset per-dialogue round metrics.
+        """
         for v in self.metrics.values():
             v["hits@1/100"] = 0.0
             v["loss"] = 0.0
@@ -405,7 +420,9 @@ class TransresnetMultimodalAgent(TransresnetAgent):
                 v["med_rank"] = []
 
     def report(self):
-        """Report per-dialogue round metrics."""
+        """
+        Report per-dialogue round metrics.
+        """
         m = {k: {} for k in ["first_round", "second_round", "third_round+"]}
         for k, v in self.metrics.items():
             if v["num_samples"] > 0:

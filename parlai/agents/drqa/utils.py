@@ -35,7 +35,9 @@ def normalize_text(text):
 
 
 def load_embeddings(opt, word_dict):
-    """Initialize embeddings from file of pretrained vectors."""
+    """
+    Initialize embeddings from file of pretrained vectors.
+    """
     embeddings = torch.Tensor(len(word_dict), opt['embedding_dim'])
     embeddings.normal_(0, 1)
     opt['embedding_file'] = modelzoo_path(opt.get('datapath'), opt['embedding_file'])
@@ -85,7 +87,9 @@ def build_feature_dict(opt):
 
 
 def vectorize(opt, ex, word_dict, feature_dict):
-    """Turn tokenized text inputs into feature vectors."""
+    """
+    Turn tokenized text inputs into feature vectors.
+    """
     # Index words
     document = torch.LongTensor([word_dict[w] for w in ex['document']])
     question = torch.LongTensor([word_dict[w] for w in ex['question']])
@@ -239,7 +243,9 @@ def batchify(batch, null=0, cuda=False):
 
 
 class AverageMeter(object):
-    """Computes and stores the average and current value."""
+    """
+    Computes and stores the average and current value.
+    """
 
     def __init__(self):
         self.reset()

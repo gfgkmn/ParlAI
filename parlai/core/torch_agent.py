@@ -27,22 +27,27 @@ import os
 from torch import optim
 
 from parlai.core.agents import Agent
+from parlai.utils.thread import SharedTable
 from parlai.core.build_data import modelzoo_path
 from parlai.core.dict import DictionaryAgent
-from parlai.core.utils import (
+from parlai.core.message import Message
+from parlai.utils.misc import (
     AttrDict,
     argsort,
+    fp16_optimizer_wrapper,
     padded_tensor,
     warn_once,
     round_sigfigs,
-    fp16_optimizer_wrapper,
 )
-from parlai.core.distributed_utils import is_primary_worker
 
 try:
     import torch
 except ImportError:
     raise ImportError('Need to install Pytorch: go to pytorch.org')
+
+
+class StopTrainException(Exception):
+    pass
 
 
 class Batch(AttrDict):
@@ -206,11 +211,15 @@ class History(object):
         self.reset_on_next_update = False
 
     def parse(self, text):
-        """Tokenize text with the given dictionary."""
+        """
+        Tokenize text with the given dictionary.
+        """
         return self.dict.txt2vec(text)
 
     def reset(self):
-        """Clear the history."""
+        """
+        Clear the history.
+        """
         self.history_raw_strings = []
         self.history_strings = []
         self.history_vecs = []
@@ -272,18 +281,22 @@ class History(object):
                 # update history vecs
                 self._update_vecs(text)
 
-        if obs['episode_done']:
+        if obs.get('episode_done'):
             # end of this episode, clear the history when we see a new example
             self.reset_on_next_update = True
 
     def get_history_str(self):
-        """Return the string version of the history."""
+        """
+        Return the string version of the history.
+        """
         if len(self.history_strings) > 0:
             return self.delimiter.join(self.history_strings)
         return None
 
     def get_history_vec(self):
-        """Return a vectorized version of the history."""
+        """
+        Return a vectorized version of the history.
+        """
         if len(self.history_vecs) == 0:
             return None
 
@@ -304,7 +317,9 @@ class History(object):
         return history
 
     def get_history_vec_list(self):
-        """Return a list of history vecs."""
+        """
+        Return a list of history vecs.
+        """
         return self.history_vecs
 
     def _add_person_tokens(self, text, token, add_after_newln=False):
@@ -390,7 +405,9 @@ class TorchAgent(ABC, Agent):
 
     @classmethod
     def add_cmdline_args(cls, argparser):
-        """Add the default commandline args we expect most agents to want."""
+        """
+        Add the default commandline args we expect most agents to want.
+        """
         agent = argparser.add_argument_group('TorchAgent Arguments')
         agent.add_argument(
             '-i',
@@ -448,7 +465,7 @@ class TorchAgent(ABC, Agent):
             ' should be valid.',
         )
         optim_group.add_argument(
-            '-lr', '--learningrate', type=float, default=1, help='learning rate'
+            '-lr', '--learningrate', type=float, default=1, help='Learning rate'
         )
         optim_group.add_argument(
             '-clip',
@@ -456,6 +473,14 @@ class TorchAgent(ABC, Agent):
             type=float,
             default=0.1,
             help='gradient clipping using l2 norm',
+        )
+        optim_group.add_argument(
+            '--adam-eps',
+            type=float,
+            default=1e-8,
+            hidden=True,
+            help='Epsilon value for Adam optimizers. Set to 1e-6 if your '
+            'large model has stability issues, but prefer the default.',
         )
         optim_group.add_argument(
             '-mom',
@@ -487,7 +512,7 @@ class TorchAgent(ABC, Agent):
             'value like 0.9 or a comma-separated tuple like 0.9,0.999',
         )
         optim_group.add_argument(
-            '-wd',
+            '-wdecay',
             '--weight-decay',
             type=float,
             default=None,
@@ -537,7 +562,7 @@ class TorchAgent(ABC, Agent):
         lr_group.add_argument(
             '--update-freq',
             type=int,
-            default=-1,
+            default=1,
             hidden=True,
             help='Accumulate gradients N times before performing an optimizer.step().',
         )
@@ -637,34 +662,11 @@ class TorchAgent(ABC, Agent):
         cls.dictionary_class().add_cmdline_args(argparser)
 
     def __init__(self, opt, shared=None):
-        """Initialize agent."""
+        """
+        Initialize agent.
+        """
         super().__init__(opt, shared)
         opt = self.opt
-        if not shared:
-            # intitialize any important structures from scratch
-            self.replies = {}  # past replies
-            self.dict = self.build_dictionary()
-            if opt.get('fp16'):
-                # Volta cores revert to FP32 hardware if tensors are not multiples
-                # of 8 in all dimensions. This INCLUDES the embeddings layer! As
-                # such, we need some extra magic to ensure the dictionary is padded
-                # with extra tokens to make it a multiple of 8.
-                if len(self.dict) % 8 != 0:
-                    for i in range(8 - len(self.dict) % 8):
-                        self.dict['__FP16_PAD_{}__'.format(i)] = 1
-        else:
-            # copy initialized data from shared table
-            self.opt = shared['opt']
-            self.dict = shared['dict']
-            if self.opt['batchsize'] == 1:
-                # if we're not using batching (e.g. mturk), then replies really need
-                # to stay separated
-                self.replies = {}
-            else:
-                self.replies = shared['replies']
-
-        if opt.get('numthreads', 1) > 1:
-            torch.set_num_threads(1)
 
         # check for cuda
         self.use_cuda = not opt['no_cuda'] and torch.cuda.is_available()
@@ -675,6 +677,47 @@ class TorchAgent(ABC, Agent):
                 torch.cuda.set_device(opt['gpu'])
         # indicate whether using fp16
         self.fp16 = self.use_cuda and self.opt.get('fp16', False)
+
+        if shared is None:
+            # intitialize any important structures from scratch
+            self.replies = {}  # past replies
+            self._replies_are_shared = False
+            self.dict = self.build_dictionary()
+
+            if opt.get('fp16'):
+                # Volta cores revert to FP32 hardware if tensors are not multiples
+                # of 8 in all dimensions. This INCLUDES the embeddings layer! As
+                # such, we need some extra magic to ensure the dictionary is padded
+                # with extra tokens to make it a multiple of 8.
+                if len(self.dict) % 8 != 0:
+                    for i in range(8 - len(self.dict) % 8):
+                        self.dict['__FP16_PAD_{}__'.format(i)] = 1
+
+            self.metrics = {}
+            # gradient norms
+            self.metrics['gnorm'] = 0.0
+            # gradient clipping rate
+            self.metrics['clip'] = 0.0
+            # number of calls to optimizer.step()
+            self.metrics['updates'] = 0
+        else:
+            # copy initialized data from shared table
+            self.opt = shared['opt']
+            self.dict = shared['dict']
+            self.model = shared['model']
+            self.criterion = shared['criterion']
+            self.metrics = shared['metrics']
+            if self.opt['batchsize'] == 1 or self.opt['interactive_mode']:
+                # if we're not using batching (e.g. mturk), then replies really need
+                # to stay separated
+                self.replies = {}
+                self._replies_are_shared = False
+            else:
+                self.replies = shared['replies']
+                self._replies_are_shared = True
+
+        if opt.get('numthreads', 1) > 1:
+            torch.set_num_threads(1)
 
         # Default to the class name, sans "Agent". child can override
         self.id = type(self).__name__.replace("Agent", "")
@@ -702,14 +745,7 @@ class TorchAgent(ABC, Agent):
         label_truncate = opt.get('label_truncate') or opt['truncate']
         self.label_truncate = label_truncate if label_truncate >= 0 else None
         # stores up to hist_utt past observations within current dialog
-        self.history = self.history_class()(
-            opt,
-            maxlen=self.text_truncate,
-            size=self.histsz,
-            p1_token=self.P1_TOKEN,
-            p2_token=self.P2_TOKEN,
-            dict_agent=self.dict,
-        )
+        self.history = self.build_history()
 
         self.is_training = False  # track whether model is training
         self.rank_candidates = opt['rank_candidates']
@@ -717,12 +753,25 @@ class TorchAgent(ABC, Agent):
         # set interactive mode or not according to options.
         self.set_interactive_mode(opt['interactive_mode'], shared)
 
+    def build_history(self):
+        """
+        Return the constructed history object.
+        """
+        return self.history_class()(
+            self.opt,
+            maxlen=self.text_truncate,
+            size=self.histsz,
+            p1_token=self.P1_TOKEN,
+            p2_token=self.P2_TOKEN,
+            dict_agent=self.dict,
+        )
+
     def build_dictionary(self):
         """
         Return the constructed dictionary, which will be set to self.dict.
 
-        If you need to add additional tokens to the dictionary, this is likely
-        the right place to do it.
+        If you need to add additional tokens to the dictionary, this is likely the right
+        place to do it.
         """
         d = self.dictionary_class()(self.opt)
         if self.opt.get('person_tokens'):
@@ -752,6 +801,15 @@ class TorchAgent(ABC, Agent):
                 # next check for 'model_file', this would override init_model
                 init_model = opt['model_file']
                 is_finetune = False
+            if (
+                opt.get('load_from_checkpoint')
+                and opt.get('init_model')
+                and opt['init_model'].endswith('.checkpoint')
+            ):
+                # but if we're loading from a checkpoint, we should explicitly load
+                # from that point
+                init_model = opt['init_model']
+                is_finetune = False
 
             if init_model is not None:
                 # if we are loading a model, should load its dict too
@@ -759,6 +817,12 @@ class TorchAgent(ABC, Agent):
                     opt['dict_file'] = init_model + '.dict'
 
         return init_model, is_finetune
+
+    def build_model(self):
+        """
+        Construct the model and return it.
+        """
+        raise NotImplementedError('not implemented for this class')
 
     def init_optim(self, params, optim_states=None, saved_optim_type=None):
         """
@@ -800,6 +864,9 @@ class TorchAgent(ABC, Agent):
         if opt['optimizer'] in ['adam', 'sparseadam', 'fused_adam', 'adamax', 'qhadam']:
             # set betas for optims that use it
             kwargs['betas'] = opt.get('betas', (0.9, 0.999))
+            # set adam optimizer, but only if user specified it
+            if opt.get('adam_eps'):
+                kwargs['eps'] = opt['adam_eps']
 
         optim_class = self.optim_opts()[opt['optimizer']]
         self.optimizer = optim_class(params, **kwargs)
@@ -953,11 +1020,50 @@ class TorchAgent(ABC, Agent):
         if hasattr(self, 'scheduler') and self.scheduler is not None:
             current_lr = round_sigfigs(self.optimizer.param_groups[0]['lr'], 4)
             metrics['lr'] = round_sigfigs(current_lr, 4)
-        metrics['num_updates'] = self._number_training_updates
+        metrics['total_train_updates'] = self._number_training_updates
+
+        steps = self.metrics['updates']
+        if steps > 0 and self.opt.get('gradient_clip', -1) > 0:
+            metrics['gnorm'] = round_sigfigs(self.metrics['gnorm'] / steps, 4)
+            metrics['clip'] = round_sigfigs(self.metrics['clip'] / steps, 2)
+
+        if self.use_cuda:
+            metrics['gpu_mem_percent'] = round_sigfigs(self._gpu_usage(), sigfigs=3)
+
         return metrics
 
+    def _gpu_usage(self):
+        """
+        Compute GPU memory usage.
+
+        Includes both allocated and cached memory; this should be close to the
+        output of nvidia-smi, but not reflect of how much is currently demanded
+        by the program. It may be viewed as a rough approximation of
+        worst-case-until-now.
+
+        :return: Percent of allocated GPU memory as a fraction of available.
+        """
+        if not self.use_cuda:
+            return None
+        if self.opt['gpu'] == -1:
+            # use all gpus available locally
+            devices = range(torch.cuda.device_count())
+        else:
+            devices = [self.opt['gpu']]
+        memory_avail = 0
+        memory_used = 0
+        for dev in devices:
+            props = torch.cuda.get_device_properties(dev)
+            memory_avail += props.total_memory
+            memory_used += torch.cuda.memory_allocated(dev) + torch.cuda.memory_cached(
+                dev
+            )
+        return memory_used / memory_avail
+
     def _is_lr_warming_up(self):
-        """Check if we're warming up the learning rate."""
+        """
+        Check if we're warming up the learning rate.
+        """
         return (
             self.warmup_scheduler is not None
             and self._number_training_updates <= self.opt['warmup_updates']
@@ -1089,10 +1195,6 @@ class TorchAgent(ABC, Agent):
         :param emb_type:
             pretrained embedding type
         """
-        if not is_primary_worker():
-            # we're in distributed mode, copying embeddings in the workers
-            # slows things down considerably
-            return
         embs, name = self._get_embtype(emb_type)
         cnt = 0
         for w, i in self.dict.tok2ind.items():
@@ -1114,15 +1216,23 @@ class TorchAgent(ABC, Agent):
         Subclasses will likely want to share their model as well.
         """
         shared = super().share()
+
+        if self.opt.get('numthreads', 1) > 1 and isinstance(self.metrics, dict):
+            # move metrics and model to shared memory
+            self.metrics = SharedTable(self.metrics)
+            self.model.share_memory()
+        shared['metrics'] = self.metrics
+
         shared['dict'] = self.dict
-        if hasattr(self, 'model'):
-            shared['model'] = self.model
+        shared['model'] = self.model
+        shared['criterion'] = self.criterion
         shared['opt'] = self.opt
         shared['replies'] = self.replies
         return shared
 
     def _add_start_end_tokens(self, vec, add_start=False, add_end=False):
-        """ Can handle both a 1D tensor and a list
+        """
+        Add start and end tokens to a list or tensor.
         """
         if isinstance(vec, torch.Tensor):
             if len(vec.shape) != 1:
@@ -1140,7 +1250,9 @@ class TorchAgent(ABC, Agent):
         return vec
 
     def _v2t(self, vec):
-        """Convert token indices to string of tokens."""
+        """
+        Convert token indices to string of tokens.
+        """
         new_vec = []
         if hasattr(vec, 'cpu'):
             vec = vec.cpu()
@@ -1179,7 +1291,9 @@ class TorchAgent(ABC, Agent):
         return tensor
 
     def _check_truncate(self, vec, truncate, truncate_left=False):
-        """Check that vector is truncated correctly."""
+        """
+        Check that vector is truncated correctly.
+        """
         if truncate is None:
             return vec
         if len(vec) <= truncate:
@@ -1195,21 +1309,26 @@ class TorchAgent(ABC, Agent):
 
         Useful to override to change vectorization behavior
         """
+
         if 'text' not in obs:
             return obs
 
         if 'text_vec' not in obs:
             # text vec is not precomputed, so we set it using the history
-            obs['text'] = history.get_history_str()
-            if obs['text'] is not None:
+            history_string = history.get_history_str()
+            # when text not exist, we get text_vec from history string
+            # history could be none if it is an image task and 'text'
+            # filed is be empty. We don't want this
+            if history_string is None:
+                return obs
+            obs['full_text'] = history_string
+            if history_string:
                 obs['text_vec'] = history.get_history_vec()
 
         # check truncation
-        if 'text_vec' in obs:
-            obs['text_vec'] = torch.LongTensor(
-                self._check_truncate(obs['text_vec'], truncate, True)
-            )
-
+        if obs.get('text_vec') is not None:
+            truncated_vec = self._check_truncate(obs['text_vec'], truncate, True)
+            obs.force_set('text_vec', torch.LongTensor(truncated_vec))
         return obs
 
     def _set_label_vec(self, obs, add_start, add_end, truncate):
@@ -1231,9 +1350,8 @@ class TorchAgent(ABC, Agent):
 
         elif label_type + '_vec' in obs:
             # check truncation of pre-computed vector
-            obs[label_type + '_vec'] = self._check_truncate(
-                obs[label_type + '_vec'], truncate
-            )
+            truncated_vec = self._check_truncate(obs[label_type + '_vec'], truncate)
+            obs.force_set(label_type + '_vec', torch.LongTensor(truncated_vec))
         else:
             # pick one label if there are multiple
             lbls = obs[label_type]
@@ -1257,7 +1375,7 @@ class TorchAgent(ABC, Agent):
                 for i, c in enumerate(vecs):
                     vecs[i] = self._check_truncate(c, truncate)
         elif self.rank_candidates and obs.get('label_candidates'):
-            obs['label_candidates'] = list(obs['label_candidates'])
+            obs.force_set('label_candidates', list(obs['label_candidates']))
             obs['label_candidates_vecs'] = [
                 self._vectorize_text(c, add_start, add_end, truncate, False)
                 for c in obs['label_candidates']
@@ -1321,7 +1439,9 @@ class TorchAgent(ABC, Agent):
         return obs
 
     def is_valid(self, obs):
-        """Determine if an observation is valid or not."""
+        """
+        Determine if an observation is valid or not.
+        """
         return 'text_vec' in obs or 'image' in obs
 
     def batchify(self, obs_batch, sort=False):
@@ -1363,7 +1483,7 @@ class TorchAgent(ABC, Agent):
 
         # TEXT
         xs, x_lens = None, None
-        if any('text_vec' in ex for ex in exs):
+        if any(ex.get('text_vec') is not None for ex in exs):
             _xs = [ex.get('text_vec', self.EMPTY) for ex in exs]
             xs, x_lens = padded_tensor(
                 _xs, self.NULL_IDX, self.use_cuda, fp16friendly=self.opt.get('fp16')
@@ -1454,12 +1574,11 @@ class TorchAgent(ABC, Agent):
         """
         if output is None:
             return batch_reply
-        if output.text is not None:
-            for i, response in zip(valid_inds, output.text):
-                batch_reply[i]['text'] = response
-        if output.text_candidates is not None:
-            for i, cands in zip(valid_inds, output.text_candidates):
-                batch_reply[i]['text_candidates'] = cands
+        for k, v in output.items():
+            if v is None:
+                continue
+            for i, sub_val in zip(valid_inds, v):
+                batch_reply[i][k] = sub_val
         return batch_reply
 
     def last_reply(self, use_reply='label'):
@@ -1510,6 +1629,10 @@ class TorchAgent(ABC, Agent):
 
         This includes remembering the past history of the conversation.
         """
+        # TODO: Migration plan: TorchAgent currently supports being passed
+        # observations as vanilla dicts for legacy interop; eventually we
+        # want to remove this behavior and demand that teachers return Messages
+        observation = Message(observation)
         reply = self.last_reply(use_reply=self.opt.get('use_reply', 'label'))
         # update the history using the observation
         self.history.update_history(observation, add_next=reply)
@@ -1559,8 +1682,8 @@ class TorchAgent(ABC, Agent):
         """
         Save model parameters to path (or default to model_file arg).
 
-        Please try to refrain from overriding this function, and instead
-        override `state_dict(self)` for more specific saving.
+        Please try to refrain from overriding this function, and instead override
+        `state_dict(self)` for more specific saving.
         """
         path = self.opt.get('model_file', None) if path is None else path
 
@@ -1608,14 +1731,32 @@ class TorchAgent(ABC, Agent):
         return states
 
     def reset(self):
-        """Clear internal states."""
+        """
+        Clear internal states.
+        """
         self.observation = {}
         self.history.reset()
         self.replies.clear()
         self.reset_metrics()
 
+    def reset_metrics(self):
+        """
+        Reset all TorchAgentMetrics.
+        """
+        super().reset_metrics()
+        self.metrics['gnorm'] = 0.0
+        self.metrics['clip'] = 0.0
+        self.metrics['updates'] = 0
+
     def act(self):
-        """Call batch_act with the singleton batch."""
+        """
+        Call batch_act with the singleton batch.
+        """
+        if self._replies_are_shared:
+            raise RuntimeError(
+                'act() will misbehave in batching mode. Set batchsize to 1, or '
+                '--interactive-mode true'
+            )
         return self.batch_act([self.observation])[0]
 
     def batch_act(self, observations):
@@ -1631,7 +1772,10 @@ class TorchAgent(ABC, Agent):
         """
         batch_size = len(observations)
         # initialize a list of replies with this agent's id
-        batch_reply = [{'id': self.getID()} for _ in range(batch_size)]
+        batch_reply = [
+            Message({'id': self.getID(), 'episode_done': False})
+            for _ in range(batch_size)
+        ]
 
         # check if there are any labels available, if so we will train on them
         self.is_training = any('labels' in obs for obs in observations)
@@ -1658,27 +1802,37 @@ class TorchAgent(ABC, Agent):
 
     @abstractmethod
     def train_step(self, batch):
-        """[Abstract] Process one batch with training labels."""
+        """
+        [Abstract] Process one batch with training labels.
+        """
         pass
 
     @abstractmethod
     def eval_step(self, batch):
-        """[Abstract] Process one batch but do not train on it."""
+        """
+        [Abstract] Process one batch but do not train on it.
+        """
         pass
 
     def set_interactive_mode(self, mode, shared):
-        """ Set interactive mode on or off."""
-        # Base class is a no-op.
-        pass
+        """
+        Set interactive mode on or off.
+        """
+        if shared is None and mode:
+            # Only print in the non-shared version.
+            print("[" + self.id + ': full interactive mode on.' + ']')
 
     def backward(self, loss):
         """
         Perform a backward pass.
 
-        It is recommended you use this instead of
-        loss.backward(), for integration with distributed training and FP16
-        training.
+        It is recommended you use this instead of loss.backward(), for integration with
+        distributed training and FP16 training.
         """
+        if self.opt.get('update_freq', 1) > 1:
+            # gradient accumulation, but still need to average across the minibatches
+            loss = loss / self.opt['update_freq']
+
         if self.fp16:
             self.optimizer.backward(loss, update_master_grads=False)
         else:
@@ -1702,6 +1856,24 @@ class TorchAgent(ABC, Agent):
             if self._number_grad_accum != 0:
                 return
 
+        if self.fp16:
+            # we've been accumulating grads in fp16 and delaying the fp32 copy update.
+            # finally time to perform the update.
+            self.optimizer.update_master_grads()
+
+        if self.opt.get('gradient_clip', -1) > 0:
+            if self.fp16:
+                grad_norm = self.optimizer.clip_master_grads(self.opt['gradient_clip'])
+            else:
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), self.opt['gradient_clip']
+                )
+            self.metrics['gnorm'] += grad_norm
+            self.metrics['clip'] += float(grad_norm > self.opt['gradient_clip'])
+
+        self.metrics['updates'] += 1
+        self.optimizer.step()
+
         # keep track up number of steps, compute warmup factor
         self._number_training_updates += 1
 
@@ -1716,27 +1888,12 @@ class TorchAgent(ABC, Agent):
             # training step scheduler
             self.scheduler.step(self._number_training_updates)
 
-        if self.fp16:
-            # we've been accumulating grads in fp16 and delaying the fp32 copy update.
-            # finally time to perform the update.
-            self.optimizer.update_master_grads()
-
-        if self.opt.get('gradient_clip', -1) > 0:
-            if self.fp16:
-                self.optimizer.clip_master_grads(self.opt['gradient_clip'])
-            else:
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), self.opt['gradient_clip']
-                )
-
-        self.optimizer.step()
-
     def zero_grad(self):
         """
         Zero out optimizer.
 
-        It is recommended you call this in train_step. It automatically handles
-        gradient accumulation if agent is called with --update-freq.
+        It is recommended you call this in train_step. It automatically handles gradient
+        accumulation if agent is called with --update-freq.
         """
         if self._number_grad_accum != 0:
             # if we're accumulating gradients, don't actually zero things out yet.

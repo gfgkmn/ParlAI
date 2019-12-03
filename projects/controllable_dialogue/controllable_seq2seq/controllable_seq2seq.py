@@ -19,9 +19,8 @@ for the paper, we have kept this file mostly the same.
 """
 
 from parlai.core.torch_agent import TorchAgent, Output, Batch
-from parlai.core.torch_generator_agent import Beam
-from parlai.core.utils import padded_tensor, round_sigfigs, argsort
-from parlai.core.thread_utils import SharedTable
+from parlai.utils.misc import padded_tensor, round_sigfigs, argsort, neginf
+from parlai.utils.thread import SharedTable
 from .modules import Seq2seq, opt_to_kwargs
 from .util import ConvAI2History, show_beam_cands, reorder_extrep2gram_qn
 from .controls import (
@@ -37,7 +36,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from collections import defaultdict, namedtuple
+from collections import namedtuple, Counter
+from operator import attrgetter
 
 import os
 import math
@@ -48,17 +48,17 @@ import copy
 
 class ControllableSeq2seqAgent(TorchAgent):
     """
-    This is a version of the Seq2seqAgent, that allows for attribute control via
-    Conditional Training (CT) and/or Weighted Decoding (WD).
+    Seq2Seq withattribute control via Conditional Training and/or Weighted Decoding.
 
-    See the paper:
-    "What makes a good conversation? How controllable attributes affect human judgments"
-    https://arxiv.org/pdf/1902.08654.pdf
+    See the paper: "What makes a good conversation? How controllable attributes affect
+    human judgments" https://arxiv.org/pdf/1902.08654.pdf
     """
 
     @classmethod
     def add_cmdline_args(cls, argparser):
-        """Add command-line arguments specifically for this agent."""
+        """
+        Add command-line arguments specifically for this agent.
+        """
         agent = argparser.add_argument_group('ControllableSeq2seqAgent Arguments')
         agent.add_argument(
             '--init-model',
@@ -260,17 +260,19 @@ class ControllableSeq2seqAgent(TorchAgent):
 
     @staticmethod
     def model_version():
-        """Return current version of this model, counting up from 0.
+        """
+        Return current version of this model, counting up from 0.
 
-        Models may not be backwards-compatible with older versions.
-        Version 1 split from version 0 on Aug 29, 2018.
-        To use version 0, use --model legacy:seq2seq:0
+        Models may not be backwards-compatible with older versions. Version 1 split from
+        version 0 on Aug 29, 2018. To use version 0, use --model legacy:seq2seq:0
         (legacy agent code is located in parlai/agents/legacy_agents).
         """
         return 1
 
     def __init__(self, opt, shared=None):
-        """Set up model."""
+        """
+        Set up model.
+        """
         init_model = None
         if not shared:  # only do this on first setup
             initialize_control_information(opt)
@@ -331,7 +333,15 @@ class ControllableSeq2seqAgent(TorchAgent):
                 print('[ Loading existing model params from {} ]' ''.format(init_model))
                 states = self.load(init_model)
 
-            self._init_model(states=states)
+            self.model = self.build_model(states=states)
+            if self.use_cuda:
+                self.model.cuda()
+                if self.multigpu:
+                    self.model = torch.nn.DataParallel(self.model)
+                    self.model.encoder = self.model.module.encoder
+                    self.model.decoder = self.model.module.decoder
+                    self.model.longest_label = self.model.module.longest_label
+                    self.model.output = self.model.module.output
 
         # set up criteria
         if opt.get('numsoftmax', 1) > 1:
@@ -384,12 +394,14 @@ class ControllableSeq2seqAgent(TorchAgent):
         # weights) to states
         states['model'][key] = init_decoder_ih_l0
 
-    def _init_model(self, states=None):
-        """Initialize model, override to change model setup."""
+    def build_model(self, states=None):
+        """
+        Initialize model, override to change model setup.
+        """
         opt = self.opt
 
         kwargs = opt_to_kwargs(opt)
-        self.model = Seq2seq(
+        model = Seq2seq(
             len(self.dict),
             opt['embeddingsize'],
             opt['hiddensize'],
@@ -405,11 +417,11 @@ class ControllableSeq2seqAgent(TorchAgent):
             print('skipping preinitialization of embeddings for bpe')
         elif not states and opt['embedding_type'] != 'random':
             # `not states`: only set up embeddings if not loading model
-            self._copy_embeddings(self.model.decoder.lt.weight, opt['embedding_type'])
+            self._copy_embeddings(model.decoder.lt.weight, opt['embedding_type'])
             if opt['lookuptable'] in ['unique', 'dec_out']:
                 # also set encoder lt, since it's not shared
                 self._copy_embeddings(
-                    self.model.encoder.lt.weight, opt['embedding_type'], log=False
+                    model.encoder.lt.weight, opt['embedding_type'], log=False
                 )
 
         if states:
@@ -417,28 +429,21 @@ class ControllableSeq2seqAgent(TorchAgent):
                 self._add_control(states)
 
             # set loaded states if applicable
-            self.model.load_state_dict(states['model'])
+            model.load_state_dict(states['model'])
 
         if opt['embedding_type'].endswith('fixed'):
             print('Seq2seq: fixing embedding weights.')
-            self.model.decoder.lt.weight.requires_grad = False
-            self.model.encoder.lt.weight.requires_grad = False
+            model.decoder.lt.weight.requires_grad = False
+            model.encoder.lt.weight.requires_grad = False
             if opt['lookuptable'] in ['dec_out', 'all']:
-                self.model.decoder.e2s.weight.requires_grad = False
+                model.decoder.output.e2s.weight.requires_grad = False
 
-        if self.use_cuda:
-            self.model.cuda()
-            if self.multigpu:
-                self.model = torch.nn.DataParallel(self.model)
-                self.model.encoder = self.model.module.encoder
-                self.model.decoder = self.model.module.decoder
-                self.model.longest_label = self.model.module.longest_label
-                self.model.output = self.model.module.output
-
-        return self.model
+        return model
 
     def _init_controls(self):
         """
+        Initialize controls.
+
         Sets the following:
 
           self.control_vars: list of strings. The CT controls sorted alphabetically.
@@ -554,7 +559,9 @@ class ControllableSeq2seqAgent(TorchAgent):
             self.wd_features, self.wd_wts = [], []
 
     def _v2t(self, vec):
-        """Convert token indices to string of tokens."""
+        """
+        Convert token indices to string of tokens.
+        """
         new_vec = []
         if hasattr(vec, 'cpu'):
             vec = vec.cpu()
@@ -566,11 +573,15 @@ class ControllableSeq2seqAgent(TorchAgent):
         return self.dict.vec2txt(new_vec)
 
     def zero_grad(self):
-        """Zero out optimizer."""
+        """
+        Zero out optimizer.
+        """
         self.optimizer.zero_grad()
 
     def update_params(self):
-        """Do one optimization step."""
+        """
+        Do one optimization step.
+        """
         if self.opt['gradient_clip'] > 0:
             torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(), self.opt['gradient_clip']
@@ -578,17 +589,20 @@ class ControllableSeq2seqAgent(TorchAgent):
         self.optimizer.step()
 
     def reset_metrics(self):
-        """Reset metrics for reporting loss and perplexity."""
+        """
+        Reset metrics for reporting loss and perplexity.
+        """
         super().reset_metrics()
         self.metrics['loss'] = 0.0
         self.metrics['num_tokens'] = 0
         self.metrics['correct_tokens'] = 0
 
     def report(self):
-        """Report loss and perplexity from model's perspective.
+        """
+        Report loss and perplexity from model's perspective.
 
-        Note that this includes predicting __END__ and __UNK__ tokens and may
-        differ from a truly independent measurement.
+        Note that this includes predicting __END__ and __UNK__ tokens and may differ
+        from a truly independent measurement.
         """
         m = {}
         num_tok = self.metrics['num_tokens']
@@ -608,7 +622,9 @@ class ControllableSeq2seqAgent(TorchAgent):
         return m
 
     def share(self):
-        """Share internal states between parent and child instances."""
+        """
+        Share internal states between parent and child instances.
+        """
         shared = super().share()
         shared['model'] = self.model
         if self.opt.get('numthreads', 1) > 1:
@@ -626,13 +642,17 @@ class ControllableSeq2seqAgent(TorchAgent):
         return shared
 
     def vectorize(self, *args, **kwargs):
-        """Override vectorize for seq2seq."""
+        """
+        Override vectorize for seq2seq.
+        """
         kwargs['add_start'] = False  # model does this in module code
         kwargs['add_end'] = True  # we do want this
         return super().vectorize(*args, **kwargs)
 
     def batchify(self, *args, **kwargs):
-        """Override batchify options for seq2seq."""
+        """
+        Override batchify options for seq2seq.
+        """
         kwargs['sort'] = True  # need sorted for pack_padded
         batch = super().batchify(*args, **kwargs)
 
@@ -670,7 +690,7 @@ class ControllableSeq2seqAgent(TorchAgent):
         # ======== END COPIED FROM TORCHAGENT ========
 
         # Add history to the batch
-        history = [ConvAI2History(ex['text'], dictionary=self.dict) for ex in exs]
+        history = [ConvAI2History(ex['full_text'], dictionary=self.dict) for ex in exs]
 
         # Add CT control vars to batch
         ctrl_vec = get_ctrl_vec(exs, history, self.control_settings)  # tensor or None
@@ -686,7 +706,9 @@ class ControllableSeq2seqAgent(TorchAgent):
         return batch
 
     def _init_cuda_buffer(self, model, criterion, batchsize, maxlen):
-        """Pre-initialize CUDA buffer by doing fake forward pass."""
+        """
+        Pre-initialize CUDA buffer by doing fake forward pass.
+        """
         if self.use_cuda and not hasattr(self, 'buffer_initialized'):
             try:
                 print('preinitializing pytorch cuda buffer')
@@ -714,7 +736,9 @@ class ControllableSeq2seqAgent(TorchAgent):
                     raise e
 
     def train_step(self, batch):
-        """Train on a single batch of examples."""
+        """
+        Train on a single batch of examples.
+        """
         batchsize = batch.text_vec.size(0)
         if self.multigpu and batchsize % 2 != 0:
             # throw out one training example
@@ -783,6 +807,9 @@ class ControllableSeq2seqAgent(TorchAgent):
         return cand_replies
 
     def greedy_search(self, batch):
+        """
+        Perform greedy search.
+        """
         cand_params = self._build_cands(batch)
         seq_len = None if not self.multigpu else batch.text_vec.size(1)
         out = self.model(
@@ -807,35 +834,43 @@ class ControllableSeq2seqAgent(TorchAgent):
         min_n_best=5,
         max_ts=40,
         block_ngram=0,
-        wd_features=[],
-        wd_wts=[],
+        wd_features=None,
+        wd_wts=None,
     ):
-        """ Beam search given the model and Batch
+        """
+        Beam search given the model and Batch.
+
         This function uses model with the following reqs:
+
         - model.encoder takes input returns tuple (enc_out, enc_hidden, attn_mask)
         - model.decoder takes decoder params and returns decoder outputs after attn
         - model.output takes decoder outputs and returns distr over dictionary
 
-        Function arguments:
-        model : nn.Module, here defined in modules.py
-        batch : Batch structure with input and labels
-        beam_size : Size of each beam during the search
-        start : start of sequence token
-        end : end of sequence token
-        pad : padding token
-        min_length : minimum length of the decoded sequence
-        min_n_best : minimum number of completed hypothesis generated from each beam
-        max_ts: the maximum length of the decoded sequence
-        wd_features: list of strings, the WD features to use
-        wd_weights: list of floats, the WD weights to use
+        :param model: nn.Module, here defined in modules.py
+        :param batch: Batch structure with input and labels
+        :param beam_size: Size of each beam during the search
+        :param start: start of sequence token
+        :param end: end of sequence token
+        :param pad: padding token
+        :param min_length: minimum length of the decoded sequence
+        :param min_n_best: minimum number of completed hypothesis generated
+            from each beam
+        :param max_ts: the maximum length of the decoded sequence
+        :param wd_features: list of strings, the WD features to use
+        :param wd_weights: list of floats, the WD weights to use
 
-        Return:
-        beam_preds_scores : list of tuples (prediction, score) for each sample in Batch
-        n_best_preds_scores : list of n_best list of tuples (prediction, score) for
-                              each sample from Batch
-        beams : list of Beam instances defined in Beam class, can be used for any
-                following postprocessing, e.g. dot logging.
+        :return:
+            - beam_preds_scores : list of tuples (prediction, score) for each
+              sample in Batch
+            - n_best_preds_scores : list of n_best list of tuples (prediction,
+              score) for each sample from Batch
+            - beams : list of Beam instances defined in Beam class, can be used
+              for any following postprocessing, e.g. dot logging.
         """
+        if wd_features is None:
+            wd_features = []
+        if wd_wts is None:
+            wd_wts = []
         encoder_states = model.encoder(batch.text_vec)
         enc_out = encoder_states[0]
         enc_hidden = encoder_states[1]
@@ -995,6 +1030,9 @@ class ControllableSeq2seqAgent(TorchAgent):
         return beam_preds_scores, n_best_beam_preds_scores, beams
 
     def extend_input(self, batch):
+        """
+        Extend the input.
+        """
         # add pad tensor to text vec
         pad_tensor = torch.zeros(1, batch.text_vec.size(1)).long().cuda()
         text_vec = torch.cat([batch.text_vec, pad_tensor], 0)
@@ -1016,6 +1054,9 @@ class ControllableSeq2seqAgent(TorchAgent):
         return batch
 
     def truncate_input(self, batch):
+        """
+        Truncate the input.
+        """
         # truncate batch for multigpu
         text_vec = batch.text_vec[:-1]
         batch = batch._replace(text_vec=text_vec)
@@ -1025,13 +1066,18 @@ class ControllableSeq2seqAgent(TorchAgent):
         return batch
 
     def truncate_output(self, out):
+        """
+        Truncate the output.
+        """
         new_out_0 = out[0][:-1]
         new_out_1 = None if out[1] is None else out[1][:-1]
         new_out_2 = [vec[:-1] for vec in out[2]]
         return tuple([new_out_0, new_out_1, new_out_2])
 
     def eval_step(self, batch):
-        """Evaluate a single batch of examples."""
+        """
+        Evaluate a single batch of examples.
+        """
         if batch.text_vec is None:
             return
         orig_batch = batch  # save for evaluation
@@ -1130,7 +1176,9 @@ class ControllableSeq2seqAgent(TorchAgent):
         return Output(text, cand_choices)
 
     def save(self, path=None):
-        """Save model parameters if model_file is set."""
+        """
+        Save model parameters if model_file is set.
+        """
         path = self.opt.get('model_file', None) if path is None else path
 
         if path and hasattr(self, 'model'):
@@ -1150,7 +1198,9 @@ class ControllableSeq2seqAgent(TorchAgent):
                 json.dump(self.opt, handle)
 
     def load(self, path):
-        """Return opt and model states."""
+        """
+        Return opt and model states.
+        """
         states = torch.load(path, map_location=lambda cpu, _: cpu)
 
         # check opt file for multigpu
@@ -1170,87 +1220,369 @@ class ControllableSeq2seqAgent(TorchAgent):
         return states
 
 
-class mydefaultdict(defaultdict):
-    """Get function also uses default_factory for this defaultdict.
+class Beam(object):
+    """
+    Generic beam class.
 
-    This makes dict.get() behave like dict[] if a default is not provided.
+    It keeps information about beam_size hypothesis.
     """
 
-    def get(self, key, default=None):
-        """Return value at key or default if key is not in dict.
-
-        If a default is not provided, return the default factory value.
+    def __init__(
+        self,
+        beam_size,
+        min_length=3,
+        padding_token=0,
+        bos_token=1,
+        eos_token=2,
+        min_n_best=3,
+        cuda='cpu',
+        block_ngram=0,
+    ):
         """
-        # override default from "get" (like "__getitem__" already is)
-        return super().get(key, default or self.default_factory())
+        Instantiate Beam object.
 
-
-class PerplexityEvaluatorAgent(ControllableSeq2seqAgent):
-    """Subclass for doing standardized perplexity evaluation.
-
-    This is designed to be used in conjunction with the PerplexityWorld at
-    parlai/scripts/eval_ppl.py. It uses the `next_word_probability` function
-    to calculate the probability of tokens one token at a time.
-    """
-
-    def __init__(self, opt, shared=None):
-        """Initialize evaluator."""
-        if opt.get('multigpu'):
-            print(
-                '| WARNING: Multi-GPU is not supported for the Perplexity '
-                + 'Evaluator Agent. Setting this option to False.'
-            )
-            opt['multigpu'] = False
-        super().__init__(opt, shared)
-        self.prev_enc = None
-        self.last_xs = None
-
-    def next_word_probability(self, partial_out):
-        """Return probability distribution over next words.
-
-        This probability is based on both nn input and partial true output.
-        This is used to calculate the per-word perplexity.
-
-        Arguments:
-        observation -- input observation dict
-        partial_out -- list of previous "true" words
-
-        Returns a dict, where each key is a word and each value is a
-        probability score for that word.
-        Unset keys will use a probability of 1e-7.
-
-        e.g.
-        {'text': 'Run test program.'}, ['hello'] => {'world': 1.0}
+        :param beam_size:
+            number of hypothesis in the beam
+        :param min_length:
+            minimum length of the predicted sequence
+        :param padding_token:
+            Set to 0 as usual in ParlAI
+        :param bos_token:
+            Set to 1 as usual in ParlAI
+        :param eos_token:
+            Set to 2 as usual in ParlAI
+        :param min_n_best:
+            Beam will not be done unless this amount of finished hypothesis
+            (with EOS) is done
+        :param cuda:
+            What device to use for computations
         """
-        obs = self.observation
-        xs = obs['text_vec'].unsqueeze(0)
-        ys = self._vectorize_text(
-            ' '.join(partial_out), False, True, self.truncate
-        ).unsqueeze(0)
-        if (
-            self.prev_enc is not None
-            and self.last_xs is not None
-            and (
-                xs.shape[1] != self.last_xs.shape[1]
-                or (xs == self.last_xs).sum().item() != xs.shape[1]
-            )
-        ):
-            # reset prev_enc, this is a new input
-            self.prev_enc = None
-        self.last_xs = xs
-
-        self.model.eval()
-        out = self.model(
-            xs,
-            ctrl_inputs=None,
-            ys=(ys if len(partial_out) > 0 else None),
-            prev_enc=self.prev_enc,
-            maxlen=1,
+        self.beam_size = beam_size
+        self.min_length = min_length
+        self.eos = eos_token
+        self.bos = bos_token
+        self.pad = padding_token
+        self.device = cuda
+        # recent score for each hypo in the beam
+        self.scores = torch.Tensor(self.beam_size).float().zero_().to(self.device)
+        # self.scores values per each time step
+        self.all_scores = [torch.Tensor([0.0] * beam_size).to(self.device)]
+        # backtracking id to hypothesis at previous time step
+        self.bookkeep = []
+        # output tokens at each time step
+        self.outputs = [
+            torch.Tensor(self.beam_size).long().fill_(self.bos).to(self.device)
+        ]
+        # keeps tuples (score, time_step, hyp_id)
+        self.finished = []
+        self.HypothesisTail = namedtuple(
+            'HypothesisTail', ['timestep', 'hypid', 'score', 'tokenid']
         )
-        scores, self.prev_enc = out[0], out[2]
-        # scores is bsz x seqlen x num_words, so select probs of current index
-        probs = F.softmax(scores.select(1, -1), dim=1).squeeze()
-        dist = mydefaultdict(lambda: 1e-7)  # default probability for any token
-        for i in range(len(probs)):
-            dist[self.dict[i]] = probs[i].item()
-        return dist
+        self.eos_top = False
+        self.eos_top_ts = None
+        self.n_best_counter = 0
+        self.min_n_best = min_n_best
+        self.block_ngram = block_ngram
+        self.partial_hyps = [[self.bos] for i in range(beam_size)]
+
+    @staticmethod
+    def find_ngrams(input_list, n):
+        """
+        Get list of ngrams with context length n-1.
+        """
+        return list(zip(*[input_list[i:] for i in range(n)]))
+
+    def get_output_from_current_step(self):
+        """
+        Get the outputput at the current step.
+        """
+        return self.outputs[-1]
+
+    def get_backtrack_from_current_step(self):
+        """
+        Get the backtrack at the current step.
+        """
+        return self.bookkeep[-1]
+
+    def advance(self, softmax_probs):
+        """
+        Advance the beam one step.
+        """
+        voc_size = softmax_probs.size(-1)
+        current_length = len(self.all_scores) - 1
+        if current_length < self.min_length:
+            # penalize all eos probs to make it decode longer
+            for hyp_id in range(softmax_probs.size(0)):
+                softmax_probs[hyp_id][self.eos] = neginf(softmax_probs.dtype)
+        if len(self.bookkeep) == 0:
+            # the first step we take only the first hypo into account since all
+            # hypos are the same initially
+            beam_scores = softmax_probs[0]
+        else:
+            # we need to sum up hypo scores and curr softmax scores before topk
+            # [beam_size, voc_size]
+            beam_scores = softmax_probs + self.scores.unsqueeze(1).expand_as(
+                softmax_probs
+            )
+            for i in range(self.outputs[-1].size(0)):
+                if self.block_ngram > 0:
+                    current_hypo = self.partial_hyps[i][1:]
+                    current_ngrams = []
+                    for ng in range(self.block_ngram):
+                        ngrams = Beam.find_ngrams(current_hypo, ng)
+                        if len(ngrams) > 0:
+                            current_ngrams.extend(ngrams)
+                    counted_ngrams = Counter(current_ngrams)
+                    if any(v > 1 for k, v in counted_ngrams.items()):
+                        # block this hypothesis hard
+                        beam_scores[i] = neginf(softmax_probs.dtype)
+
+                #  if previous output hypo token had eos
+                # we penalize those word probs to never be chosen
+                if self.outputs[-1][i] == self.eos:
+                    # beam_scores[i] is voc_size array for i-th hypo
+                    beam_scores[i] = neginf(softmax_probs.dtype)
+
+        flatten_beam_scores = beam_scores.view(-1)  # [beam_size * voc_size]
+        with torch.no_grad():
+            best_scores, best_idxs = torch.topk(
+                flatten_beam_scores, self.beam_size, dim=-1
+            )
+
+        self.scores = best_scores
+        self.all_scores.append(self.scores)
+        # get the backtracking hypothesis id as a multiple of full voc_sizes
+        hyp_ids = best_idxs / voc_size
+        # get the actual word id from residual of the same division
+        tok_ids = best_idxs % voc_size
+
+        self.outputs.append(tok_ids)
+        self.bookkeep.append(hyp_ids)
+        self.partial_hyps = [
+            self.partial_hyps[hyp_ids[i]] + [tok_ids[i].item()]
+            for i in range(self.beam_size)
+        ]
+
+        #  check new hypos for eos label, if we have some, add to finished
+        for hypid in range(self.beam_size):
+            if self.outputs[-1][hypid] == self.eos:
+                #  this is finished hypo, adding to finished
+                eostail = self.HypothesisTail(
+                    timestep=len(self.outputs) - 1,
+                    hypid=hypid,
+                    score=self.scores[hypid],
+                    tokenid=self.eos,
+                )
+                self.finished.append(eostail)
+                self.n_best_counter += 1
+
+        if self.outputs[-1][0] == self.eos:
+            self.eos_top = True
+            if self.eos_top_ts is None:
+                self.eos_top_ts = len(self.outputs) - 1
+
+    def done(self):
+        """
+        Return whether beam search is complete.
+        """
+        return self.eos_top and self.n_best_counter >= self.min_n_best
+
+    def get_top_hyp(self):
+        """
+        Get single best hypothesis.
+
+        :return: hypothesis sequence and the final score
+        """
+        top_hypothesis_tail = self.get_rescored_finished(n_best=1)[0]
+        return (
+            self.get_hyp_from_finished(top_hypothesis_tail),
+            top_hypothesis_tail.score,
+        )
+
+    def get_hyp_from_finished(self, hypothesis_tail):
+        """
+        Extract hypothesis ending with EOS at timestep with hyp_id.
+
+        :param timestep:
+            timestep with range up to len(self.outputs)-1
+        :param hyp_id:
+            id with range up to beam_size-1
+        :return:
+            hypothesis sequence
+        """
+        assert self.outputs[hypothesis_tail.timestep][hypothesis_tail.hypid] == self.eos
+        assert hypothesis_tail.tokenid == self.eos
+        hyp_idx = []
+        endback = hypothesis_tail.hypid
+        for i in range(hypothesis_tail.timestep, -1, -1):
+            hyp_idx.append(
+                self.HypothesisTail(
+                    timestep=i,
+                    hypid=endback,
+                    score=self.all_scores[i][endback],
+                    tokenid=self.outputs[i][endback],
+                )
+            )
+            endback = self.bookkeep[i - 1][endback]
+
+        return hyp_idx
+
+    @staticmethod
+    def get_pretty_hypothesis(list_of_hypotails):
+        """
+        Return prettier version of the hypotheses.
+        """
+        hypothesis = []
+        for i in list_of_hypotails:
+            hypothesis.append(i.tokenid)
+
+        hypothesis = torch.stack(list(reversed(hypothesis)))
+
+        return hypothesis
+
+    def get_rescored_finished(self, n_best=None):
+        """
+        Return finished hypotheses in rescored order.
+
+        :param n_best:
+            how many n best hypothesis to return
+        :return:
+            list with hypothesis
+        """
+        rescored_finished = []
+        for finished_item in self.finished:
+            current_length = finished_item.timestep + 1
+            # these weights are from Google NMT paper
+            length_penalty = math.pow((1 + current_length) / 6, 0.65)
+            rescored_finished.append(
+                self.HypothesisTail(
+                    timestep=finished_item.timestep,
+                    hypid=finished_item.hypid,
+                    score=finished_item.score / length_penalty,
+                    tokenid=finished_item.tokenid,
+                )
+            )
+
+        srted = sorted(rescored_finished, key=attrgetter('score'), reverse=True)
+
+        if n_best is not None:
+            srted = srted[:n_best]
+
+        return srted
+
+    def check_finished(self):
+        """
+        Check if self.finished is empty and add hyptail in that case.
+
+        This will be suboptimal hypothesis since the model did not get any EOS
+        """
+        if len(self.finished) == 0:
+            # we change output because we want outputs to have eos
+            # to pass assert in L102, it is ok since empty self.finished
+            # means junk prediction anyway
+            self.outputs[-1][0] = self.eos
+            hyptail = self.HypothesisTail(
+                timestep=len(self.outputs) - 1,
+                hypid=0,
+                score=self.all_scores[-1][0],
+                tokenid=self.outputs[-1][0],
+            )
+
+            self.finished.append(hyptail)
+
+    def get_beam_dot(self, dictionary=None, n_best=None):
+        """
+        Create pydot graph representation of the beam.
+
+        :param outputs:
+            self.outputs from the beam
+        :param dictionary:
+            tok 2 word dict to save words in the tree nodes
+        :returns:
+            pydot graph
+        """
+        try:
+            import pydot
+        except ImportError:
+            print("Please install pydot package to dump beam visualization")
+
+        graph = pydot.Dot(graph_type='digraph')
+        outputs = [i.tolist() for i in self.outputs]
+        bookkeep = [i.tolist() for i in self.bookkeep]
+        all_scores = [i.tolist() for i in self.all_scores]
+        if n_best is None:
+            n_best = int(self.beam_size / 2)
+
+        # get top nbest hyp
+        top_hyp_idx_n_best = []
+        n_best_colors = ['aquamarine', 'chocolate1', 'deepskyblue', 'green2', 'tan']
+        sorted_finished = self.get_rescored_finished(n_best=n_best)
+        for hyptail in sorted_finished:
+            # do not include EOS since it has rescored score not from original
+            # self.all_scores, we color EOS with black
+            top_hyp_idx_n_best.append(self.get_hyp_from_finished(hyptail))
+
+        # create nodes
+        for tstep, lis in enumerate(outputs):
+            for hypid, token in enumerate(lis):
+                if tstep == 0:
+                    hypid = 0  # collapse all __NULL__ nodes
+                node_tail = self.HypothesisTail(
+                    timestep=tstep,
+                    hypid=hypid,
+                    score=all_scores[tstep][hypid],
+                    tokenid=token,
+                )
+                color = 'white'
+                rank = None
+                for i, hypseq in enumerate(top_hyp_idx_n_best):
+                    if node_tail in hypseq:
+                        if n_best <= 5:  # color nodes only if <=5
+                            color = n_best_colors[i]
+                        rank = i
+                        break
+                label = (
+                    "<{}".format(
+                        dictionary.vec2txt([token]) if dictionary is not None else token
+                    )
+                    + " : "
+                    + "{:.{prec}f}>".format(all_scores[tstep][hypid], prec=3)
+                )
+
+                graph.add_node(
+                    pydot.Node(
+                        node_tail.__repr__(),
+                        label=label,
+                        fillcolor=color,
+                        style='filled',
+                        xlabel='{}'.format(rank) if rank is not None else '',
+                    )
+                )
+
+        # create edges
+        for revtstep, lis in reversed(list(enumerate(bookkeep))):
+            for i, prev_id in enumerate(lis):
+                from_node = graph.get_node(
+                    '"{}"'.format(
+                        self.HypothesisTail(
+                            timestep=revtstep,
+                            hypid=prev_id,
+                            score=all_scores[revtstep][prev_id],
+                            tokenid=outputs[revtstep][prev_id],
+                        ).__repr__()
+                    )
+                )[0]
+                to_node = graph.get_node(
+                    '"{}"'.format(
+                        self.HypothesisTail(
+                            timestep=revtstep + 1,
+                            hypid=i,
+                            score=all_scores[revtstep + 1][i],
+                            tokenid=outputs[revtstep + 1][i],
+                        ).__repr__()
+                    )
+                )[0]
+                newedge = pydot.Edge(from_node.get_name(), to_node.get_name())
+                graph.add_edge(newedge)
+
+        return graph
